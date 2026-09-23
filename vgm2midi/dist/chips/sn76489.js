@@ -3,9 +3,6 @@
 // `host: MidiConverter`のper-conversion可変状態（channels/lastLatchedChannel等）を
 // 直接読み書きする——詳細な設計判断はvgm2midi/CLAUDE.mdの「Refactor: event-output.ts」
 // を参照。
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleGameGearStereo = handleGameGearStereo;
 exports.handlePSGWrite = handlePSGWrite;
@@ -15,7 +12,6 @@ exports.sn76489Velocity = sn76489Velocity;
 exports.sn76489Expression = sn76489Expression;
 exports.sn76489NoiseNote = sn76489NoiseNote;
 exports.reevaluateSN76489NoiseForChannel2Frequency = reevaluateSN76489NoiseForChannel2Frequency;
-const midi_writer_js_1 = __importDefault(require("midi-writer-js"));
 const midi_math_1 = require("../midi-math");
 const event_output_1 = require("../event-output");
 /** Game Gear $4F のLRルーティングをSN76489各voiceのCC10へ反映する。 */
@@ -94,17 +90,7 @@ function handlePSGWrite(host, data, currentTime, activeNotes, cmdIndex) {
                 else if (!isOff && state.active && oldVolume !== nibble) {
                     // Volume change while active -> Send Expression (CC 11)
                     const expression = Math.max(0, Math.min(127, 127 - (state.volume * 8)));
-                    const trackState = host.getTrack(key);
-                    const currentTick = (0, midi_math_1.samplesToTicks)(currentTime, host.options.tempo, host.sampleRate);
-                    const gap = Math.max(0, currentTick - trackState.cursor);
-                    const midiCh = host.midiChannelForKey(key);
-                    trackState.track.addEvent(new midi_writer_js_1.default.ControllerChangeEvent({
-                        controllerNumber: 11,
-                        controllerValue: expression,
-                        channel: midiCh,
-                        delta: gap
-                    }));
-                    trackState.cursor = currentTick;
+                    (0, event_output_1.addExpression)(host, key, expression, currentTime);
                 }
             }
             else {

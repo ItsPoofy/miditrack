@@ -61,13 +61,13 @@ function handleYM2608Write(host, cmd, currentTime, activeNotes, cmdIndex) {
     }
     if ((0, opn_shared_1.handleOPNTimbreWrite)(host, keyPrefix, port, reg, data, currentTime))
         return;
-    if (port === 0 && handleYM2608KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes))
+    if (port === 0 && handleYM2608KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes, cmdIndex))
         return;
     if (port === 0 && (0, opn_shared_1.handleOPNCh3SpecialFrequencyWrite)(host, ch3Context, reg, data, currentTime, activeNotes, cmdIndex))
         return;
     updateYM2608Frequency(host, instance, port, reg, data, currentTime, activeNotes, cmdIndex);
 }
-function handleYM2608KeyWrite(host, context, data, register, currentTime, activeNotes) {
+function handleYM2608KeyWrite(host, context, data, register, currentTime, activeNotes, cmdIndex) {
     if (register !== 0x28)
         return false;
     const channelOffset = data & 0x03;
@@ -83,6 +83,9 @@ function handleYM2608KeyWrite(host, context, data, register, currentTime, active
     state.keyOnMask = (data >> 4) & 0x0F;
     const shouldSound = state.keyOnMask !== 0;
     if (shouldSound && !state.active) {
+        if (cmdIndex !== undefined) {
+            host.peekUpcomingOPNFreq(cmdIndex, 'YM2608', (data & 0x04) === 0 ? 0 : 1, channelOffset, context.instance);
+        }
         state.opnActivePitchScale = host.opnPitchScale(state);
         state.opnActiveVelocity = host.opnCarrierVelocity(state);
         state.active = true;
@@ -116,7 +119,7 @@ function updateYM2608Frequency(host, instance, port, reg, data, currentTime, act
     const hadPendingUpdate = state.hasPendingFrequencyUpdate ?? false;
     state.hasPendingFrequencyUpdate = isSplitUpdate;
     if (state.active && !isSplitUpdate && (state.frequency !== oldFrequency || hadPendingUpdate)) {
-        host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2608_FM_PITCH_BEND_RANGE);
+        host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2608_FM_PITCH_BEND_RANGE, channel);
     }
 }
 function updateYM2608Prescaler(host, instance, register, currentTime, activeNotes) {

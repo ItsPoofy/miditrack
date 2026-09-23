@@ -133,6 +133,9 @@ export interface PlaybackOptions {
 }
 export interface ConversionOptions extends PlaybackOptions {
     tempo?: number;
+    internalTempo?: number;
+    autoTempo?: boolean;
+    detectedTempo?: number;
     trackPerChannel?: boolean;
     verbose?: boolean;
     suppressHardwareNoise?: boolean;
@@ -144,4 +147,12 @@ export interface ConversionOptions extends PlaybackOptions {
     ym2612Ch3SpecialPercussion?: boolean;
     /** チップごとの衝突しない MIDI sidecar を生成する。 */
     splitChips?: boolean;
+    /** Auto-snap note events to nearest musical subdivision (default: true). */
+    snapToGrid?: boolean;
+    /** Auto-align initial sound driver startup silence so the first downbeat lands on tick 0 (default: true). */
+    trimPreroll?: boolean;
+    /** Initial sample offset subtracted from timestamps. */
+    startSampleOffset?: number;
+    /** Preserve sub-semitone hardware crystal detune (default: true). Set false for clean 0 pitch bend on note onsets. */
+    preserveChipTuning?: boolean;
 }

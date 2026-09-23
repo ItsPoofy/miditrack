@@ -56,7 +56,7 @@ const wav_writer_1 = require("./wav-writer");
  * （バンク未捕捉、シーク先がバンク範囲外）は無音のまま進む。DACの発音が
  * 一度も実際に混ざらなかった場合は出力ファイルを作らず、voicesFound=0を返す。
  */
-function renderDacWav(data, totalSamples, outPath) {
+function renderDacWav(data, totalSamples, outPath, startOffset = 0) {
     if (!Number.isSafeInteger(totalSamples) || totalSamples < 0) {
         throw new Error(`totalSamples must be a non-negative safe integer: ${totalSamples}`);
     }
@@ -115,6 +115,7 @@ function renderDacWav(data, totalSamples, outPath) {
     if (voices.size === 0) {
         return { framesWritten: 0, voicesFound: 0 };
     }
-    (0, wav_writer_1.writeWaveFile)(outPath, output);
-    return { framesWritten: totalSamples, voicesFound: voices.size };
+    const trimmed = startOffset > 0 ? output.subarray(startOffset * wav_writer_1.WAV_CHANNELS) : output;
+    (0, wav_writer_1.writeWaveFile)(outPath, trimmed);
+    return { framesWritten: Math.max(0, totalSamples - startOffset), voicesFound: voices.size };
 }

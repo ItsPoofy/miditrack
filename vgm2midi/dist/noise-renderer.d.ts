@@ -6,7 +6,7 @@ import { VGMData } from './types';
  * HuC6280のDDA/PCM、マスター/チャンネルバランスは描画しない。ノイズが実際に発音する
  * 区間が無い場合は出力ファイルを作らず、voicesFound=0を返す。
  */
-export declare function renderNoiseWav(data: VGMData, totalSamples: number, outPath: string): {
+export declare function renderNoiseWav(data: VGMData, totalSamples: number, outPath: string, startOffset?: number): {
     framesWritten: number;
     voicesFound: number;
 };

@@ -4,6 +4,7 @@ type ActiveNoteMap = Map<string, {
     note: number;
     startTime: number;
     startVolume: number;
+    startTick?: number;
 }>;
 /** 同じMIDI channelで異なるdescriptorが同時発音した場合だけ警告を記録する。 */
 export declare function registerDescriptorStart(host: MidiConverter, descriptor: TrackDescriptor, currentTime: number): void;

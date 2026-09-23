@@ -6,7 +6,7 @@ type ActiveNoteMap = Map<string, {
     startVolume: number;
 }>;
 export declare function handleYM2608Write(host: MidiConverter, cmd: VGMCommand, currentTime: number, activeNotes: ActiveNoteMap, cmdIndex: number): void;
-export declare function handleYM2608KeyWrite(host: MidiConverter, context: OPNCh3Context, data: number, register: number, currentTime: number, activeNotes: ActiveNoteMap): boolean;
+export declare function handleYM2608KeyWrite(host: MidiConverter, context: OPNCh3Context, data: number, register: number, currentTime: number, activeNotes: ActiveNoteMap, cmdIndex?: number): boolean;
 export declare function updateYM2608Frequency(host: MidiConverter, instance: number, port: number, reg: number, data: number, currentTime: number, activeNotes: ActiveNoteMap, cmdIndex: number): void;
 export declare function updateYM2608Prescaler(host: MidiConverter, instance: number, register: number, currentTime: number, activeNotes: ActiveNoteMap): void;
 export declare function handleYM2608RhythmWrite(host: MidiConverter, instance: number, register: number, data: number, currentTime: number, activeNotes: ActiveNoteMap): void;

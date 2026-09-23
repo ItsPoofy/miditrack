@@ -45,7 +45,7 @@ const HUC6280_LFSR_SEED = 1;
  * HuC6280のDDA/PCM、マスター/チャンネルバランスは描画しない。ノイズが実際に発音する
  * 区間が無い場合は出力ファイルを作らず、voicesFound=0を返す。
  */
-function renderNoiseWav(data, totalSamples, outPath) {
+function renderNoiseWav(data, totalSamples, outPath, startOffset = 0) {
     if (!Number.isSafeInteger(totalSamples) || totalSamples < 0) {
         throw new Error(`totalSamples must be a non-negative safe integer: ${totalSamples}`);
     }
@@ -101,8 +101,9 @@ function renderNoiseWav(data, totalSamples, outPath) {
     if (voices.size === 0) {
         return { framesWritten: 0, voicesFound: 0 };
     }
-    (0, wav_writer_1.writeWaveFile)(outPath, output);
-    return { framesWritten: totalSamples, voicesFound: voices.size };
+    const trimmed = startOffset > 0 ? output.subarray(startOffset * wav_writer_1.WAV_CHANNELS) : output;
+    (0, wav_writer_1.writeWaveFile)(outPath, trimmed);
+    return { framesWritten: Math.max(0, totalSamples - startOffset), voicesFound: voices.size };
 }
 function createSN76489State() {
     return {

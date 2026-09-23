@@ -19,7 +19,7 @@ import { VGMData } from './types';
  * （バンク未捕捉、シーク先がバンク範囲外）は無音のまま進む。DACの発音が
  * 一度も実際に混ざらなかった場合は出力ファイルを作らず、voicesFound=0を返す。
  */
-export declare function renderDacWav(data: VGMData, totalSamples: number, outPath: string): {
+export declare function renderDacWav(data: VGMData, totalSamples: number, outPath: string, startOffset?: number): {
     framesWritten: number;
     voicesFound: number;
 };

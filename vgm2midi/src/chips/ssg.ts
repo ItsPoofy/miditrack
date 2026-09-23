@@ -28,9 +28,9 @@ export function handleSSGWrite(
     updateSSGTonePeriod(host, keyPrefix, reg, data, currentTime, activeNotes, cmdIndex, chip, instance);
   }
   else if (reg === 6) updateSSGNoisePeriod(host, keyPrefix, data, currentTime, activeNotes);
-  else if (reg === 7) updateSSGMixer(host, keyPrefix, data, currentTime, activeNotes);
+  else if (reg === 7) updateSSGMixer(host, keyPrefix, data, currentTime, activeNotes, cmdIndex, chip, instance);
   else if (reg >= 8 && reg <= 10) {
-    updateSSGVolume(host, keyPrefix, reg - 8, data, currentTime, activeNotes);
+    updateSSGVolume(host, keyPrefix, reg - 8, data, currentTime, activeNotes, cmdIndex, chip, instance);
   } else if (reg === 13) {
     retriggerSSGEnvelope(host, keyPrefix, currentTime, activeNotes);
   }
@@ -122,7 +122,10 @@ export function updateSSGVolume(
   channel: number,
   data: number,
   currentTime: number,
-  activeNotes: ActiveNoteMap
+  activeNotes: ActiveNoteMap,
+  cmdIndex?: number,
+  chip?: string,
+  instance = 0
 ): void {
   const key = `${keyPrefix}_${channel}`;
   const state = host.channels.get(key)!;
@@ -133,11 +136,40 @@ export function updateSSGVolume(
   const wasNoiseActive = state.isNoiseActive;
   state.volume = effectiveVolume;
 
-  syncSSGToneState(host, keyPrefix, channel, currentTime, activeNotes);
+  const volumeRise = effectiveVolume - oldVolume;
+  // If an active tone channel experiences a sharp software envelope re-attack (rise >= 3 and volume >= 6),
+  // retrigger NoteOff/NoteOn so repeated notes of the same pitch are not merged into one continuous note.
+  let isAttackRise = wasToneActive && state.active && volumeRise >= 3 && effectiveVolume >= 6;
+  if (isAttackRise) {
+    const active = activeNotes.get(key);
+    // If the active note was started very recently (within 32 samples / <= ~0.7 ms), do not retrigger.
+    if (active && (currentTime - active.startTime) <= 32) {
+      isAttackRise = false;
+    } else if (cmdIndex !== undefined && chip !== undefined && state.frequency > 0) {
+      const upcomingFreq = host.peekUpcomingSSGFrequency(cmdIndex, chip, channel, instance, keyPrefix);
+      if (upcomingFreq !== null && upcomingFreq > 0) {
+        const semitoneDiff = Math.abs(12 * Math.log2(state.frequency / upcomingFreq));
+        if (semitoneDiff > 0.8) {
+          // A pitch change is upcoming within <= 32 samples.
+          // Do NOT retrigger with the old pitch here, because updateSSGTonePeriod
+          // will cleanly transition from the old note to the new note without leaving a tiny artifact.
+          isAttackRise = false;
+        }
+      }
+    }
+  }
+
+  if (isAttackRise) {
+    noteOff(host, key, 0, currentTime, activeNotes);
+    state.active = true;
+    noteOn(host, key, 0, currentTime, activeNotes);
+  } else {
+    syncSSGToneState(host, keyPrefix, channel, currentTime, activeNotes, cmdIndex, chip, instance);
+  }
   syncSSGNoiseState(host, keyPrefix, channel, currentTime, activeNotes);
 
   const expression = Math.round((effectiveVolume / 15) * 127);
-  if (wasToneActive && state.active && oldVolume !== effectiveVolume) {
+  if (wasToneActive && state.active && oldVolume !== effectiveVolume && !isAttackRise) {
     addExpression(host, key, expression, currentTime);
   }
   if (wasNoiseActive && state.isNoiseActive && oldVolume !== effectiveVolume) {
@@ -150,13 +182,16 @@ export function updateSSGMixer(
   keyPrefix: string,
   data: number,
   currentTime: number,
-  activeNotes: ActiveNoteMap
+  activeNotes: ActiveNoteMap,
+  cmdIndex?: number,
+  chip?: string,
+  instance = 0
 ): void {
   for (let channel = 0; channel < 3; channel++) {
     const state = host.channels.get(`${keyPrefix}_${channel}`)!;
     state.isToneEnabled = (data & (1 << channel)) === 0;
     state.isNoise = (data & (1 << (channel + 3))) === 0;
-    syncSSGToneState(host, keyPrefix, channel, currentTime, activeNotes);
+    syncSSGToneState(host, keyPrefix, channel, currentTime, activeNotes, cmdIndex, chip, instance);
     syncSSGNoiseState(host, keyPrefix, channel, currentTime, activeNotes);
   }
 }
@@ -166,13 +201,19 @@ export function syncSSGToneState(
   keyPrefix: string,
   channel: number,
   currentTime: number,
-  activeNotes: ActiveNoteMap
+  activeNotes: ActiveNoteMap,
+  cmdIndex?: number,
+  chip?: string,
+  instance = 0
 ): void {
   const key = `${keyPrefix}_${channel}`;
   const state = host.channels.get(key)!;
   const shouldSound = state.isToneEnabled && state.volume > 0;
 
   if (shouldSound && !state.active) {
+    if (cmdIndex !== undefined && chip !== undefined) {
+      host.peekUpcomingSSGPeriod(cmdIndex, chip, channel, instance, keyPrefix);
+    }
     state.active = true;
     noteOn(host, key, 0, currentTime, activeNotes);
   } else if (!shouldSound && state.active) {

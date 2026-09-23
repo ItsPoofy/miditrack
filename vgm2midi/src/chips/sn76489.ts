@@ -3,9 +3,8 @@
 // 直接読み書きする——詳細な設計判断はvgm2midi/CLAUDE.mdの「Refactor: event-output.ts」
 // を参照。
 
-import MidiWriter from 'midi-writer-js';
 import type { MidiConverter } from '../midi-converter';
-import { psgRegisterToFrequency, noiseDrumNote, samplesToTicks } from '../midi-math';
+import { psgRegisterToFrequency, noiseDrumNote } from '../midi-math';
 import { addPan, addExpression, noteOn, noteOff, noteOnPercussion, updateNotePitch } from '../event-output';
 
 type ActiveNoteMap = Map<string, { note: number; startTime: number; startVolume: number }>;
@@ -94,21 +93,7 @@ export function handlePSGWrite(
         } else if (!isOff && state.active && oldVolume !== nibble) {
           // Volume change while active -> Send Expression (CC 11)
           const expression = Math.max(0, Math.min(127, 127 - (state.volume * 8)));
-
-          const trackState = host.getTrack(key);
-          const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-          const gap = Math.max(0, currentTick - trackState.cursor);
-
-          const midiCh = host.midiChannelForKey(key);
-
-          trackState.track.addEvent(new MidiWriter.ControllerChangeEvent({
-              controllerNumber: 11,
-              controllerValue: expression,
-              channel: midiCh,
-              delta: gap
-          }));
-
-          trackState.cursor = currentTick;
+          addExpression(host, key, expression, currentTime);
         }
       } else {
         syncSN76489NoiseVolume(host, oldVolume, currentTime, activeNotes);

@@ -59,7 +59,8 @@ export function handleYM2151Write(
   host: MidiConverter,
   cmd: VGMCommand,
   currentTime: number,
-  activeNotes: ActiveNoteMap
+  activeNotes: ActiveNoteMap,
+  cmdIndex?: number
 ): void {
   if (cmd.register === undefined || cmd.data === undefined) return;
 
@@ -155,6 +156,10 @@ export function handleYM2151Write(
     const csmMask = timer.nextRelease === undefined ? 0 : 0x0F;
     state.keyOnMask = timer.manualKeyOnMasks[channel] | csmMask;
 
+    if (state.keyOnMask !== 0 && cmdIndex !== undefined) {
+      host.peekUpcomingYM2151KeyCode(cmdIndex, channel, cmd.instance ?? 0);
+    }
+
     // A repeated key-on retriggers the YM2151 envelope, so mirror that onset in MIDI.
     syncYM2151ToneState(host, channel, true, currentTime, activeNotes);
     if (channel === 7) syncYM2151NoiseState(host, true, currentTime, activeNotes);
@@ -169,7 +174,7 @@ export function handleYM2151Write(
     const oldKeyCode = state.keyCode;
     state.keyCode = data & 0x7F;
     if (state.active && state.keyCode !== oldKeyCode) {
-      host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2151_FM_PITCH_BEND_RANGE);
+      host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2151_FM_PITCH_BEND_RANGE, channel);
     }
   } else if (reg >= 0x30 && reg <= 0x37) {
     const channel = reg - 0x30;
@@ -178,7 +183,7 @@ export function handleYM2151Write(
     const oldKeyFraction = state.keyFraction;
     state.keyFraction = (data >> 2) & 0x3F;
     if (state.active && state.keyFraction !== oldKeyFraction) {
-      host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2151_FM_PITCH_BEND_RANGE);
+      host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2151_FM_PITCH_BEND_RANGE, channel);
     }
   }
 }

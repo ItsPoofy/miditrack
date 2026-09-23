@@ -5,8 +5,8 @@
 
 import type { MidiConverter, ChannelState } from '../midi-converter';
 import { GBDMG_FRAME_SAMPLES } from '../midi-converter';
-import { gbDmgNoiseNoteForPeriod } from '../midi-math';
-import { addPan, addExpression, noteOn, noteOff, noteOnPercussion, updateNotePitch } from '../event-output';
+import { gbDmgNoiseNoteForPeriod, frequencyToExactMidi } from '../midi-math';
+import { addPan, addExpression, addPitchBend, getNoteFrequency, noteOn, noteOff, noteOnPercussion, updateNotePitch } from '../event-output';
 import type { VGMCommand } from '../types';
 
 type ActiveNoteMap = Map<string, { note: number; startTime: number; startVolume: number }>;
@@ -84,7 +84,12 @@ export function clockGBDMGSweep(
   state.frequency = nextFrequency;
   state.freqLSB = nextFrequency & 0xFF;
   state.freqMSB = (nextFrequency >> 8) & 0x07;
-  if (state.active) updateNotePitch(host, 'gbdmg_0', 0, currentTime, activeNotes);
+  if (state.active) {
+    const freq = getNoteFrequency(host, 'gbdmg_0', state);
+    const newExactNote = frequencyToExactMidi(freq);
+    const diff = newExactNote - state.baseMidiNote;
+    addPitchBend(host, 'gbdmg_0', diff, host.pitchBendRangeForKey('gbdmg_0'), currentTime);
+  }
 }
 
 /** 64HzのDMG envelopeをCC11へ変換する。 */

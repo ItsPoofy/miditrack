@@ -78,6 +78,7 @@ function handleYM2612Write(host, cmd, currentTime, activeNotes, cmdIndex) {
             state.keyOnMask = (data >> 4) & 0x0F;
             const keyOn = state.keyOnMask !== 0; // Any slot ON
             if (keyOn && !state.active) {
+                host.peekUpcomingOPNFreq(cmdIndex, 'YM2612', channelIndex < 3 ? 0 : 1, channelIndex % 3, 0);
                 state.opnActivePitchScale = host.opnPitchScale(state);
                 state.opnActiveVelocity = host.opnCarrierVelocity(state);
                 state.active = true;

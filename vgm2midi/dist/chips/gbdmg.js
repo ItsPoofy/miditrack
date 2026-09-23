@@ -95,8 +95,12 @@ function clockGBDMGSweep(host, currentTime, activeNotes) {
     state.frequency = nextFrequency;
     state.freqLSB = nextFrequency & 0xFF;
     state.freqMSB = (nextFrequency >> 8) & 0x07;
-    if (state.active)
-        (0, event_output_1.updateNotePitch)(host, 'gbdmg_0', 0, currentTime, activeNotes);
+    if (state.active) {
+        const freq = (0, event_output_1.getNoteFrequency)(host, 'gbdmg_0', state);
+        const newExactNote = (0, midi_math_1.frequencyToExactMidi)(freq);
+        const diff = newExactNote - state.baseMidiNote;
+        (0, event_output_1.addPitchBend)(host, 'gbdmg_0', diff, host.pitchBendRangeForKey('gbdmg_0'), currentTime);
+    }
 }
 /** 64HzのDMG envelopeをCC11へ変換する。 */
 function clockGBDMGEnvelopes(host, currentTime, activeNotes) {

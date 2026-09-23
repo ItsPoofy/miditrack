@@ -7,6 +7,7 @@ exports.MidiConverter = exports.OPN_OPERATOR_PATHS = exports.GBDMG_FRAME_SAMPLES
 const midi_writer_js_1 = __importDefault(require("midi-writer-js"));
 const vgm_chip_metadata_1 = require("./vgm-chip-metadata");
 const midi_math_1 = require("./midi-math");
+const tempo_detect_1 = require("./tempo-detect");
 const pcm_analysis_1 = require("./pcm-analysis");
 const event_output_1 = require("./event-output");
 const sn76489_1 = require("./chips/sn76489");
@@ -37,11 +38,11 @@ const YM2413_GM_PROGRAM_BY_PATCH = [
     GM_PROGRAM_DRAWBAR_ORGAN, 60, GM_PROGRAM_LEAD_1_SQUARE, 6, 11, 38, 32, 27,
 ];
 const GM_PERCUSSION_CHANNEL = 10;
-exports.YM2151_FM_PITCH_BEND_RANGE = 96;
-exports.YM2203_FM_PITCH_BEND_RANGE = 96;
-exports.YM2608_FM_PITCH_BEND_RANGE = 96;
-exports.OPL_FM_PITCH_BEND_RANGE = 96;
-exports.CHIP_PITCH_BEND_RANGE = 96;
+exports.YM2151_FM_PITCH_BEND_RANGE = 2;
+exports.YM2203_FM_PITCH_BEND_RANGE = 2;
+exports.YM2608_FM_PITCH_BEND_RANGE = 2;
+exports.OPL_FM_PITCH_BEND_RANGE = 2;
+exports.CHIP_PITCH_BEND_RANGE = 2;
 // CSM のハードウェアkey-on/key-offは同一のTimer Aオーバーフローで発生する。
 // MIDIで可聴なアタックとして扱える最小単位は1 tickなので、同じtickの複数回
 // オーバーフローは1回へ集約し、出力ノートは1 tickだけ保持する。
@@ -259,16 +260,26 @@ class MidiConverter {
         this.gbDmgStereoRouting = 0xFF;
         this.gbDmgFrameSteps = [0, 0];
         this.gbDmgNextFrameSamples = [exports.GBDMG_FRAME_SAMPLES, exports.GBDMG_FRAME_SAMPLES];
+        this.onsets = [];
+        this.startSampleOffset = 0;
         this.vgmData = vgmData;
+        const autoTempo = options.autoTempo ?? (options.tempo === undefined);
         this.options = {
             tempo: options.tempo || 120,
+            autoTempo,
             trackPerChannel: options.trackPerChannel || false,
             verbose: options.verbose || false,
             suppressHardwareNoise: options.suppressHardwareNoise || false,
             suppressYM2612Dac: options.suppressYM2612Dac || false,
             splitChips: options.splitChips || false,
+            snapToGrid: options.snapToGrid ?? (options.autoTempo === true),
+            trimPreroll: options.trimPreroll !== false,
+            startSampleOffset: options.startSampleOffset,
             opnCh3SpecialPercussion: options.opnCh3SpecialPercussion ?? options.ym2612Ch3SpecialPercussion ?? false,
+            preserveChipTuning: options.preserveChipTuning,
         };
+        this.startSampleOffset = options.startSampleOffset ?? 0;
+        this.internalTempo = options.internalTempo ?? options.tempo ?? 120;
         // Initialize PSG channels (0-2: Tone, 3: Noise)
         for (let i = 0; i < 4; i++) {
             this.channels.set(`psg_${i}`, {
@@ -1210,14 +1221,43 @@ class MidiConverter {
         const multiple = YM2413_OPERATOR_MULTIPLES[multipleNibble] ?? 1;
         return Number.isInteger(Math.log2(multiple)) ? multiple : 1;
     }
-    // gbDmgSquareFrequencyToHz()/gbDmgWaveFrequencyToHz()/gbDmgNoiseFrequencyToHz()/
-    // gbDmgNoiseNoteForPeriod()/samplesToTicks()も`this`に依存しない純粋関数として
-    // midi-math.tsへ移設した（上のimportを参照）。
+    /** VGM timeline sample を startSampleOffset 補正後に MIDI tick へ変換する。 */
+    samplesToTicks(samples) {
+        const adjusted = Math.max(0, samples - this.startSampleOffset);
+        return (0, midi_math_1.samplesToTicks)(adjusted, this.internalTempo, this.sampleRate);
+    }
+    /**
+     * レトロゲーム音源ドライバの初期化待ち（1〜3フレーム程度の無音プリロール）や
+     * 16分音符未満のグリッド位相ジッターを検出・解消し、最初のダウンビートが
+     * DAWの拍・小節線（tick 0）に正確に着地するサンプルオフセットを計算する。
+     */
+    calculateStartSampleOffset() {
+        if (this.onsets.length === 0)
+            return 0;
+        const firstOnset = Math.min(...this.onsets);
+        if (firstOnset <= 0)
+            return 0;
+        const tempo = this.internalTempo || this.options.tempo || 120;
+        const sub16Samples = (60 / tempo / 4) * this.sampleRate;
+        // 最初の音符が初期16分音符区間内（または35ms/約2フレーム内）に発生した場合は、
+        // 音源ドライバ初期化レジスタリセットによる無音プリロールと判定して先頭へ整列。
+        if (firstOnset <= Math.max(sub16Samples * 0.75, Math.round(this.sampleRate * 0.035))) {
+            return firstOnset;
+        }
+        // 弱起や休符で始まる場合でも、16分音符グリッドに対するサブ16分ジッター（ドライバ割り込み遅延等）を検出
+        const mod = firstOnset % sub16Samples;
+        const phase = mod <= sub16Samples / 2 ? mod : mod - sub16Samples;
+        if (Math.abs(phase) <= Math.round(this.sampleRate * 0.035)) {
+            return phase;
+        }
+        return 0;
+    }
     convert() {
         let currentTime = 0;
         const activeNotes = new DescriptorActiveNotes(key => this.resolveDescriptor(key).id);
         this.tracks.clear(); // Reset tracks
         this.descriptors.clear();
+        this.onsets = [];
         this.warnings = [];
         this.userWarnings = [];
         this.activeMidiDescriptors.clear();
@@ -1320,7 +1360,7 @@ class MidiConverter {
                     else if (exports.OPL_CHIPS.includes(cmd.chip))
                         (0, opl_1.handleOPLWrite)(this, cmd, currentTime, activeNotes, i);
                     else if (cmd.chip === 'YM2151')
-                        (0, ym2151_1.handleYM2151Write)(this, cmd, currentTime, activeNotes);
+                        (0, ym2151_1.handleYM2151Write)(this, cmd, currentTime, activeNotes, i);
                     else if (cmd.chip === 'AY8910')
                         (0, ay8910_1.handleAY8910Write)(this, cmd, currentTime, activeNotes, i);
                     else if (cmd.chip === 'HuC6280')
@@ -1408,7 +1448,7 @@ class MidiConverter {
                 continue;
             }
             timer.nextOverflow = nextOverflow + periodSamples;
-            const currentTick = (0, midi_math_1.samplesToTicks)(nextOverflow, this.options.tempo, this.sampleRate);
+            const currentTick = this.samplesToTicks(nextOverflow);
             if (timer.lastEmittedTick === currentTick)
                 continue;
             if (timer.nextRelease !== undefined)
@@ -1438,7 +1478,7 @@ class MidiConverter {
     }
     /** OPN/OPMが共通で使う1 MIDI tick分のCSM pulse長をsampleへ換算する。 */
     csmPulseSamples() {
-        return Math.max(1, (CSM_MIDI_PULSE_TICKS * 60 * this.sampleRate) / (this.options.tempo * midi_math_1.MIDI_PPQ));
+        return Math.max(1, (CSM_MIDI_PULSE_TICKS * 60 * this.sampleRate) / (this.internalTempo * midi_math_1.MIDI_PPQ));
     }
     /** OPN Timer Aの1周期をVGM sampleへ換算する。 */
     opnCsmPeriodSamples(chip, timer) {
@@ -1602,17 +1642,19 @@ class MidiConverter {
     // Closes the direct-DAC voice at the last actual $2A write time, not `currentTime` —
     // called from both $2B-disable and EOF (stopAllPCMVoices()), neither of which should
     // stretch the final hit's duration out to whenever this happens to be called.
-    updateKeyBoundFMPitch(key, currentTime, activeNotes, pitchBendRange) {
+    updateKeyBoundFMPitch(key, currentTime, activeNotes, pitchBendRange, midiChannelOffset = 0) {
         const state = this.channels.get(key);
         if (!activeNotes.has(key)) {
             if (state.active)
-                (0, event_output_1.noteOn)(this, key, 0, currentTime, activeNotes);
+                (0, event_output_1.noteOn)(this, key, midiChannelOffset, currentTime, activeNotes);
             return;
         }
         const frequency = (0, event_output_1.getNoteFrequency)(this, key, state);
         if (frequency <= 20)
             return;
-        const semitoneOffset = (0, midi_math_1.frequencyToExactMidi)(frequency) - state.baseMidiNote;
+        const exactMidi = (0, midi_math_1.frequencyToExactMidi)(frequency);
+        const tuningOffset = state.initialTuningOffset ?? 0;
+        const semitoneOffset = (exactMidi - state.baseMidiNote) - tuningOffset;
         (0, event_output_1.addPitchBend)(this, key, semitoneOffset, pitchBendRange, currentTime);
     }
     /** YM2608 ADPCM-Bの非repeat範囲を、VGMの44.1 kHz時間単位へ概算変換する。 */
@@ -1908,6 +1950,180 @@ class MidiConverter {
         }
         return false;
     }
+    peekUpcomingOPNFreq(cmdIndex, chip, port, channel, instance = 0) {
+        const key = chip === 'YM2612'
+            ? `ym2612_${channel + port * 3}`
+            : chip === 'YM2608'
+                ? `ym2608_${instance}_fm_${channel + port * 3}`
+                : `ym2203_${instance}_fm_${channel}`;
+        const state = this.channels.get(key);
+        if (!state)
+            return;
+        const lowReg = 0xA0 + channel;
+        const highReg = 0xA4 + channel;
+        let skippedSamples = 0;
+        let foundLow = false;
+        let foundHigh = false;
+        for (let index = cmdIndex + 1; index < this.vgmData.commands.length; index++) {
+            const next = this.vgmData.commands[index];
+            if (next.type === 'wait' || next.type === 'pcm_write') {
+                skippedSamples += next.samples ?? 0;
+                if (skippedSamples > 32)
+                    break;
+                continue;
+            }
+            if (next.type !== 'chip_write'
+                || next.chip !== chip
+                || (next.instance ?? 0) !== instance) {
+                continue;
+            }
+            if ((next.port ?? 0) === 0 && next.register === 0x28) {
+                const nextChannelOffset = (next.data ?? 0) & 0x03;
+                const nextPort = ((next.data ?? 0) & 0x04) === 0 ? 0 : 1;
+                if (nextChannelOffset === channel && nextPort === port) {
+                    break;
+                }
+            }
+            if ((next.port ?? 0) === port) {
+                if (next.register === lowReg) {
+                    state.freqLSB = next.data;
+                    foundLow = true;
+                }
+                else if (next.register === highReg) {
+                    state.freqMSB = (next.data & 0x07);
+                    state.block = (next.data >> 3) & 0x07;
+                    foundHigh = true;
+                }
+            }
+            if (foundLow && foundHigh)
+                break;
+        }
+        if (foundLow || foundHigh) {
+            state.frequency = ((state.freqMSB ?? 0) << 8) | (state.freqLSB ?? 0);
+        }
+    }
+    peekUpcomingYM2151KeyCode(cmdIndex, channel, instance = 0) {
+        const key = `ym2151_${channel}`;
+        const state = this.channels.get(key);
+        if (!state)
+            return;
+        let skippedSamples = 0;
+        let foundCode = false;
+        let foundFraction = false;
+        const codeReg = 0x28 + channel;
+        const fracReg = 0x30 + channel;
+        for (let index = cmdIndex + 1; index < this.vgmData.commands.length; index++) {
+            const next = this.vgmData.commands[index];
+            if (next.type === 'wait' || next.type === 'pcm_write') {
+                skippedSamples += next.samples ?? 0;
+                if (skippedSamples > 32)
+                    break;
+                continue;
+            }
+            if (next.type !== 'chip_write' || next.chip !== 'YM2151' || (next.instance ?? 0) !== instance) {
+                continue;
+            }
+            if (next.register === 0x08 && ((next.data ?? 0) & 0x07) === channel) {
+                break;
+            }
+            if (next.register === codeReg) {
+                state.keyCode = (next.data ?? 0) & 0x7F;
+                foundCode = true;
+            }
+            else if (next.register === fracReg) {
+                state.keyFraction = ((next.data ?? 0) >> 2) & 0x3F;
+                foundFraction = true;
+            }
+            if (foundCode && foundFraction)
+                break;
+        }
+    }
+    peekUpcomingSSGPeriod(cmdIndex, chip, channel, instance = 0, keyPrefix) {
+        const prefix = keyPrefix ?? (chip === 'AY8910' ? `ay8910_${instance}` : `${chip.toLowerCase()}_${instance}_ssg`);
+        const key = `${prefix}_${channel}`;
+        const state = this.channels.get(key);
+        if (!state)
+            return;
+        const lowReg = channel * 2;
+        const highReg = channel * 2 + 1;
+        let skippedSamples = 0;
+        let foundLow = false;
+        let foundHigh = false;
+        for (let index = cmdIndex + 1; index < this.vgmData.commands.length; index++) {
+            const next = this.vgmData.commands[index];
+            if (next.type === 'wait' || next.type === 'pcm_write') {
+                skippedSamples += next.samples ?? 0;
+                if (skippedSamples > 32)
+                    break;
+                continue;
+            }
+            if (next.type !== 'chip_write' || next.chip !== chip || (next.instance ?? 0) !== instance) {
+                continue;
+            }
+            if ((next.port ?? 0) !== 0)
+                continue;
+            if (next.register === 8 + channel && (next.data ?? 0) === 0)
+                break;
+            if (next.register === 7 && ((next.data ?? 0) & (1 << channel)) !== 0)
+                break;
+            if (next.register === lowReg) {
+                state.freqLSB = next.data;
+                foundLow = true;
+            }
+            else if (next.register === highReg) {
+                state.freqMSB = (next.data & 0x0F);
+                foundHigh = true;
+            }
+            if (foundLow && foundHigh)
+                break;
+        }
+        if (foundLow || foundHigh) {
+            state.frequency = ((state.freqMSB || 0) << 8) | (state.freqLSB || 0);
+        }
+    }
+    peekUpcomingSSGFrequency(cmdIndex, chip, channel, instance = 0, keyPrefix) {
+        const prefix = keyPrefix ?? (chip === 'AY8910' ? `ay8910_${instance}` : `${chip.toLowerCase()}_${instance}_ssg`);
+        const key = `${prefix}_${channel}`;
+        const state = this.channels.get(key);
+        if (!state)
+            return null;
+        const lowReg = channel * 2;
+        const highReg = channel * 2 + 1;
+        let skippedSamples = 0;
+        let nextLSB = state.freqLSB;
+        let nextMSB = state.freqMSB;
+        let found = false;
+        for (let index = cmdIndex + 1; index < this.vgmData.commands.length; index++) {
+            const next = this.vgmData.commands[index];
+            if (next.type === 'wait' || next.type === 'pcm_write') {
+                skippedSamples += next.samples ?? 0;
+                if (skippedSamples > 32)
+                    break;
+                continue;
+            }
+            if (next.type !== 'chip_write' || next.chip !== chip || (next.instance ?? 0) !== instance) {
+                continue;
+            }
+            if ((next.port ?? 0) !== 0)
+                continue;
+            if (next.register === 8 + channel && (next.data ?? 0) === 0)
+                break;
+            if (next.register === 7 && ((next.data ?? 0) & (1 << channel)) !== 0)
+                break;
+            if (next.register === lowReg) {
+                nextLSB = next.data;
+                found = true;
+            }
+            else if (next.register === highReg) {
+                nextMSB = (next.data & 0x0F);
+                found = true;
+            }
+        }
+        if (found) {
+            return ((nextMSB || 0) << 8) | (nextLSB || 0);
+        }
+        return null;
+    }
     // registerDescriptorStart()/registerDescriptorStop()/addExpression()/addPCMPan()/
     // addPan()/noteOnPercussion()/noteOnPCMPercussion()/noteOffPCMPercussion()/
     // pcmNoteForSample()は、イベント出力の定型処理としてevent-output.tsへ移設した
@@ -2027,6 +2243,21 @@ class MidiConverter {
     }
     /** MIDIファイルを書き出し、音符が生成されなかった場合は空ファイルを作らず失敗させる。 */
     exportToFile(outputPath) {
+        // Pass 1: analyze onsets to calculate true musical tempo and eliminate retro sound driver startup preroll
+        this.convert();
+        if (this.options.autoTempo) {
+            const detected = (0, tempo_detect_1.detectTempoFromOnsets)(this.onsets, this.sampleRate);
+            this.internalTempo = detected;
+            this.options.tempo = Math.round(detected);
+            this.options.detectedTempo = Math.round(detected);
+            if (this.options.verbose) {
+                console.log(`Auto-detected tempo: ${detected} BPM (export tempo: ${this.options.tempo} BPM)`);
+            }
+        }
+        if (this.options.trimPreroll !== false) {
+            this.startSampleOffset = this.calculateStartSampleOffset();
+        }
+        // Pass 2: generate MIDI events with aligned downbeat and musical grid snapping
         const tracks = this.convert();
         if (this.generatedNoteCount === 0) {
             throw new Error('No MIDI notes were generated. The VGM may contain only unsupported or non-tonal sound data.');
@@ -2057,7 +2288,11 @@ class MidiConverter {
         require('fs').writeFileSync(outputPath, JSON.stringify({
             version: 1,
             sampleRate: this.sampleRate,
-            sampleCount: totalSamples,
+            sampleCount: Math.max(0, totalSamples - this.startSampleOffset),
+            tempo: this.options.tempo,
+            detectedTempo: this.options.detectedTempo,
+            internalTempo: this.internalTempo,
+            startSampleOffset: this.startSampleOffset,
             tracks,
             warnings: this.userWarnings,
         }, null, 2) + '\n');

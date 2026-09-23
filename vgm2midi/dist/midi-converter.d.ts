@@ -1,10 +1,10 @@
 import { VGMData, ConversionOptions } from './types';
 import { PCMTrackEvent, PCMDataBlockMetadata, PCMAnalysisMetadata } from './pcm-analysis';
-export declare const YM2151_FM_PITCH_BEND_RANGE = 96;
-export declare const YM2203_FM_PITCH_BEND_RANGE = 96;
-export declare const YM2608_FM_PITCH_BEND_RANGE = 96;
-export declare const OPL_FM_PITCH_BEND_RANGE = 96;
-export declare const CHIP_PITCH_BEND_RANGE = 96;
+export declare const YM2151_FM_PITCH_BEND_RANGE = 2;
+export declare const YM2203_FM_PITCH_BEND_RANGE = 2;
+export declare const YM2608_FM_PITCH_BEND_RANGE = 2;
+export declare const OPL_FM_PITCH_BEND_RANGE = 2;
+export declare const CHIP_PITCH_BEND_RANGE = 2;
 export type OPLChip = 'YM3812' | 'YM3526' | 'Y8950';
 export declare const OPL_CHIPS: readonly ["YM3812", "YM3526", "Y8950"];
 /** libvgm/emu2413.c由来のYM2413内蔵patch carrier register ($01) byte。 */
@@ -24,6 +24,7 @@ export interface ChannelState {
     active: boolean;
     midiNote: number;
     baseMidiNote: number;
+    initialTuningOffset?: number;
     block?: number;
     opnAlgorithm?: number;
     opnOperatorMultipliers?: number[];
@@ -109,6 +110,8 @@ interface TrackState {
     pcmEvents?: PCMTrackEvent[];
     pcmDataBlock?: PCMDataBlockMetadata;
     pcmAnalysis?: PCMAnalysisMetadata;
+    pcmStartTick?: number;
+    lastPitchBend?: number;
 }
 /** PCMトリガーに付随するチップ固有の再生範囲。 */
 export interface PCMPlaybackRangeMetadata {
@@ -139,6 +142,7 @@ export interface CSMTimerState {
 export declare class MidiConverter {
     vgmData: VGMData;
     options: ConversionOptions;
+    internalTempo: number;
     sampleRate: number;
     channels: Map<string, ChannelState>;
     private tracks;
@@ -200,6 +204,8 @@ export declare class MidiConverter {
     gbDmgStereoRouting: number;
     gbDmgFrameSteps: number[];
     gbDmgNextFrameSamples: number[];
+    onsets: number[];
+    startSampleOffset: number;
     constructor(vgmData: VGMData, options?: ConversionOptions);
     /** 第二チップの可変状態を一時的に主チップのhandlerへ差し替えて隔離する。 */
     withChipInstance(chip: string, instance: number, action: () => void): void;
@@ -269,6 +275,14 @@ export declare class MidiConverter {
     private ym2608TrackName;
     /** 選択patchのcarrier Multipleを、明確な2の累乗だけoctave補正に変換する。 */
     ym2413PitchScale(state: ChannelState): number;
+    /** VGM timeline sample を startSampleOffset 補正後に MIDI tick へ変換する。 */
+    samplesToTicks(samples: number): number;
+    /**
+     * レトロゲーム音源ドライバの初期化待ち（1〜3フレーム程度の無音プリロール）や
+     * 16分音符未満のグリッド位相ジッターを検出・解消し、最初のダウンビートが
+     * DAWの拍・小節線（tick 0）に正確に着地するサンプルオフセットを計算する。
+     */
+    calculateStartSampleOffset(): number;
     convert(): any[];
     /** VGM $31 のAY/OPN SSG LR maskを各SSG voiceのCC10へ変換する。 */
     private handleAYSSGStereo;
@@ -331,7 +345,7 @@ export declare class MidiConverter {
         note: number;
         startTime: number;
         startVolume: number;
-    }>, pitchBendRange: number): void;
+    }>, pitchBendRange: number, midiChannelOffset?: number): void;
     /** YM2608 ADPCM-Bの非repeat範囲を、VGMの44.1 kHz時間単位へ概算変換する。 */
     stopPCMVoice(activeVoices: Array<PCMVoiceNote | undefined>, channel: number, currentTime: number): void;
     private stopAllPCMVoices;
@@ -354,6 +368,10 @@ export declare class MidiConverter {
     /** bank/block/start/length/step/flagを含む安定したMSM6258編集トリガーidentityを作る。 */
     private streamIdentity;
     isOPNMultiByteFreqUpdate(cmdIndex: number, chip: string, port: number, otherReg: number, instance?: number): boolean;
+    peekUpcomingOPNFreq(cmdIndex: number, chip: string, port: number, channel: number, instance?: number): void;
+    peekUpcomingYM2151KeyCode(cmdIndex: number, channel: number, instance?: number): void;
+    peekUpcomingSSGPeriod(cmdIndex: number, chip: string, channel: number, instance?: number, keyPrefix?: string): void;
+    peekUpcomingSSGFrequency(cmdIndex: number, chip: string, channel: number, instance?: number, keyPrefix?: string): number | null;
     /** MIDIトラック記述子をlibvgmのdevice/channel mute選択へ変換する。
      *
      * Ch3 Specialの4オペレータ別トラック（Op1-3の専用トラックとOp4=通常のchannel3トラック）

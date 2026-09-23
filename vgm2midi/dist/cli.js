@@ -43,6 +43,7 @@ const vgm_playback_1 = require("./vgm-playback");
 const noise_renderer_1 = require("./noise-renderer");
 const dac_renderer_1 = require("./dac-renderer");
 const stems_1 = require("./stems");
+const tempo_detect_1 = require("./tempo-detect");
 function parseLoopCount(value) {
     const parsedValue = Number(value);
     if (!Number.isInteger(parsedValue) || parsedValue < 1) {
@@ -69,7 +70,8 @@ program
     .version('0.4.0')
     .argument('<input>', 'Input VGM or VGZ file')
     .option('-o, --output <file>', 'Output MIDI file (default: input filename with .mid extension)')
-    .option('-t, --tempo <bpm>', 'MIDI tempo in BPM', '120')
+    .option('-t, --tempo <bpm>', 'MIDI tempo in BPM')
+    .option('--auto-tempo', 'Automatically detect BPM from note onsets')
     .option('--loops <count>', 'Total loop-section playback count, including the logged pass', parseLoopCount)
     .option('--duration <seconds>', 'Target output duration in seconds', parseDuration)
     .option('-v, --verbose', 'Verbose output')
@@ -80,10 +82,29 @@ program
     .option('--ch3-special-percussion', 'Collapse OPN Ch3 Special composite hits to GM percussion')
     .option('--strict', 'Fail before output when parsed content would be omitted')
     .option('--split-chips', 'Also write collision-free chip/instance MIDI sidecars')
+    .option('--no-chip-tuning', 'Strip sub-semitone hardware crystal detune on note onsets')
+    .option('--no-snap', 'Disable automatic snapping of note onsets/offs to musical grid')
+    .option('--no-preroll-trim', 'Do not trim initial hardware driver startup silence')
     .option('--stems <directory>', 'Render sample-exact libvgm mix/chip WAV stems and manifest')
     .option('--track-metadata <file>', 'Write MIDI-track to libvgm channel mapping JSON')
+    .option('--probe', 'Probe and output detected tempo and metadata as JSON')
     .action((input, options) => {
     try {
+        // Validate input file
+        if (!fs.existsSync(input)) {
+            console.error(`Error: Input file '${input}' not found`);
+            process.exit(1);
+        }
+        if (options.probe) {
+            const parser = vgm_parser_1.VGMParser.fromFile(input);
+            const vgmData = parser.parse();
+            const playback = (0, vgm_playback_1.prepareVGMPlayback)(vgmData, {});
+            const converter = new midi_converter_1.MidiConverter(playback.data, { autoTempo: true });
+            converter.convert();
+            const detected = Math.round((0, tempo_detect_1.detectTempoFromOnsets)(converter.onsets, converter.sampleRate));
+            console.log(JSON.stringify({ tempo: detected || 120 }));
+            return;
+        }
         if (options.loops !== undefined && options.duration !== undefined) {
             throw new Error('--loops and --duration cannot be used together');
         }
@@ -92,11 +113,6 @@ program
         }
         if (options.keepDacMidi && options.dacWav === undefined) {
             throw new Error('--keep-dac-midi requires --dac-wav');
-        }
-        // Validate input file
-        if (!fs.existsSync(input)) {
-            console.error(`Error: Input file '${input}' not found`);
-            process.exit(1);
         }
         // Determine output file
         let output = options.output;
@@ -133,7 +149,12 @@ program
         if (options.verbose) {
             console.log(`Input: ${input}`);
             console.log(`Output: ${output}`);
-            console.log(`Tempo: ${options.tempo} BPM`);
+            if (options.tempo !== undefined) {
+                console.log(`Tempo: ${options.tempo} BPM`);
+            }
+            else {
+                console.log(`Tempo: Auto-detect`);
+            }
             console.log('');
         }
         // Parse VGM file
@@ -227,21 +248,32 @@ program
         if (options.verbose) {
             console.log('Converting to MIDI...');
         }
+        const requestedTempo = options.tempo !== undefined ? parseFloat(options.tempo) : undefined;
+        const autoTempo = options.autoTempo || (options.tempo === undefined);
         const converter = new midi_converter_1.MidiConverter(playback.data, {
-            tempo: parseInt(options.tempo),
+            tempo: requestedTempo,
+            autoTempo,
             verbose: options.verbose,
             suppressHardwareNoise: options.noiseWav !== undefined && !options.keepNoiseMidi,
             suppressYM2612Dac: options.dacWav !== undefined && !options.keepDacMidi,
             opnCh3SpecialPercussion: options.ch3SpecialPercussion,
             splitChips: options.splitChips,
+            snapToGrid: options.snap !== false,
+            trimPreroll: options.prerollTrim !== false,
+            preserveChipTuning: options.chipTuning !== false,
         });
         converter.exportToFile(output);
         if (options.trackMetadata !== undefined) {
             converter.exportTrackMetadata(options.trackMetadata, playback.totalSamples);
         }
-        console.log(`Successfully converted ${input} to ${output}`);
+        if (converter.options.detectedTempo !== undefined) {
+            console.log(`Successfully converted ${input} to ${output} (detected tempo: ${converter.options.detectedTempo} BPM)`);
+        }
+        else {
+            console.log(`Successfully converted ${input} to ${output} (tempo: ${converter.options.tempo} BPM)`);
+        }
         if (options.noiseWav !== undefined) {
-            const result = (0, noise_renderer_1.renderNoiseWav)(playback.data, playback.totalSamples, options.noiseWav);
+            const result = (0, noise_renderer_1.renderNoiseWav)(playback.data, playback.totalSamples, options.noiseWav, converter.startSampleOffset);
             if (result.voicesFound > 0) {
                 console.log(`Rendered ${result.voicesFound} hardware noise voice(s) to ${options.noiseWav}`);
             }
@@ -250,7 +282,7 @@ program
             }
         }
         if (options.dacWav !== undefined) {
-            const result = (0, dac_renderer_1.renderDacWav)(playback.data, playback.totalSamples, options.dacWav);
+            const result = (0, dac_renderer_1.renderDacWav)(playback.data, playback.totalSamples, options.dacWav, converter.startSampleOffset);
             if (result.voicesFound > 0) {
                 console.log(`Rendered YM2612 DAC sample audio to ${options.dacWav}`);
             }

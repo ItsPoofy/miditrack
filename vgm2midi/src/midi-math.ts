@@ -198,3 +198,32 @@ export function samplesToTicks(
   const quarterNotes = (seconds * tempo) / 60;
   return Math.round(quarterNotes * ppq);
 }
+
+/**
+ * Snaps a MIDI tick timestamp to the nearest musical grid subdivision
+ * if it falls within a jitter tolerance window (default: 35 ticks at 960 PPQ, ~15% of a 16th note).
+ *
+ * Checks standard musical subdivisions:
+ * - Straight: multiples of 120 ticks (quarter=960, 8th=480, 16th=240, 32nd=120)
+ * - Triplet: multiples of 80 ticks (triplet 8th=320, triplet 16th=160, triplet 32nd=80)
+ *
+ * Eliminates retro sound engine interrupt jitter and CPU register write latency,
+ * ensuring note onsets and note offs land dead on DAW piano roll grid lines.
+ */
+export function snapTickToMusicalGrid(tick: number, tolerance = 38): number {
+  const mod120 = tick % 120;
+  const dist120 = mod120 <= 60 ? mod120 : 120 - mod120;
+  const nearest120 = mod120 <= 60 ? tick - mod120 : tick + (120 - mod120);
+
+  const mod80 = tick % 80;
+  const dist80 = mod80 <= 40 ? mod80 : 80 - mod80;
+  const nearest80 = mod80 <= 40 ? tick - mod80 : tick + (80 - mod80);
+
+  if (dist120 <= dist80 && dist120 <= tolerance) {
+    return nearest120;
+  } else if (dist80 < dist120 && dist80 <= tolerance) {
+    return nearest80;
+  }
+  return tick;
+}
+

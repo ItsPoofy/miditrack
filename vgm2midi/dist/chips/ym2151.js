@@ -50,7 +50,7 @@ function updateOPMCsmTimer(host, instance, data, currentTime, activeNotes) {
         timer.lastEmittedTick = undefined;
     }
 }
-function handleYM2151Write(host, cmd, currentTime, activeNotes) {
+function handleYM2151Write(host, cmd, currentTime, activeNotes, cmdIndex) {
     if (cmd.register === undefined || cmd.data === undefined)
         return;
     const reg = cmd.register;
@@ -135,6 +135,9 @@ function handleYM2151Write(host, cmd, currentTime, activeNotes) {
         timer.manualKeyOnMasks[channel] = (data >> 3) & 0x0F;
         const csmMask = timer.nextRelease === undefined ? 0 : 0x0F;
         state.keyOnMask = timer.manualKeyOnMasks[channel] | csmMask;
+        if (state.keyOnMask !== 0 && cmdIndex !== undefined) {
+            host.peekUpcomingYM2151KeyCode(cmdIndex, channel, cmd.instance ?? 0);
+        }
         // A repeated key-on retriggers the YM2151 envelope, so mirror that onset in MIDI.
         syncYM2151ToneState(host, channel, true, currentTime, activeNotes);
         if (channel === 7)
@@ -149,7 +152,7 @@ function handleYM2151Write(host, cmd, currentTime, activeNotes) {
         const oldKeyCode = state.keyCode;
         state.keyCode = data & 0x7F;
         if (state.active && state.keyCode !== oldKeyCode) {
-            host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2151_FM_PITCH_BEND_RANGE);
+            host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2151_FM_PITCH_BEND_RANGE, channel);
         }
     }
     else if (reg >= 0x30 && reg <= 0x37) {
@@ -159,7 +162,7 @@ function handleYM2151Write(host, cmd, currentTime, activeNotes) {
         const oldKeyFraction = state.keyFraction;
         state.keyFraction = (data >> 2) & 0x3F;
         if (state.active && state.keyFraction !== oldKeyFraction) {
-            host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2151_FM_PITCH_BEND_RANGE);
+            host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2151_FM_PITCH_BEND_RANGE, channel);
         }
     }
 }

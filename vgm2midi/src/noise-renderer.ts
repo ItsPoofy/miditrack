@@ -37,7 +37,8 @@ interface HuC6280State {
 export function renderNoiseWav(
   data: VGMData,
   totalSamples: number,
-  outPath: string
+  outPath: string,
+  startOffset = 0,
 ): { framesWritten: number; voicesFound: number } {
   if (!Number.isSafeInteger(totalSamples) || totalSamples < 0) {
     throw new Error(`totalSamples must be a non-negative safe integer: ${totalSamples}`);
@@ -99,8 +100,9 @@ export function renderNoiseWav(
     return { framesWritten: 0, voicesFound: 0 };
   }
 
-  writeWaveFile(outPath, output);
-  return { framesWritten: totalSamples, voicesFound: voices.size };
+  const trimmed = startOffset > 0 ? output.subarray(startOffset * CHANNELS) : output;
+  writeWaveFile(outPath, trimmed);
+  return { framesWritten: Math.max(0, totalSamples - startOffset), voicesFound: voices.size };
 }
 
 function createSN76489State(): SN76489State {

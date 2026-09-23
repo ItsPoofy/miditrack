@@ -12,10 +12,10 @@ import type {
   ChannelState,
   OPLChip,
 } from './midi-converter';
-import { CHIP_PITCH_BEND_RANGE, GBDMG_SQUARE_KEYS } from './midi-converter';
+import { GBDMG_SQUARE_KEYS } from './midi-converter';
 import type { PCMDataBlockMetadata, PCMAnalysisMetadata } from './pcm-analysis';
 import {
-  samplesToTicks,
+  snapTickToMusicalGrid,
   frequencyToMidiNote,
   frequencyToExactMidi,
   psgRegisterToFrequency,
@@ -35,7 +35,7 @@ const GM_CLOSED_HI_HAT_NOTE = 42;
 const GM_PCM_PERCUSSION_FIRST_NOTE = 35;
 const GM_PCM_PERCUSSION_LAST_NOTE = 81;
 
-type ActiveNoteMap = Map<string, { note: number; startTime: number; startVolume: number }>;
+type ActiveNoteMap = Map<string, { note: number; startTime: number; startVolume: number; startTick?: number }>;
 
 /** 同じMIDI channelで異なるdescriptorが同時発音した場合だけ警告を記録する。 */
 export function registerDescriptorStart(host: MidiConverter, descriptor: TrackDescriptor, currentTime: number): void {
@@ -55,7 +55,8 @@ export function registerDescriptorStop(host: MidiConverter, descriptorId: string
 export function addExpression(host: MidiConverter, key: string, expression: number, currentTime: number): void {
   const descriptor = host.resolveDescriptor(key);
   const trackState = host.getTrack(descriptor.id);
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
+  const rawTick = host.samplesToTicks(currentTime);
+  const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
   const gap = Math.max(0, currentTick - trackState.cursor);
   const clampedExpression = Math.max(0, Math.min(127, expression));
 
@@ -65,7 +66,7 @@ export function addExpression(host: MidiConverter, key: string, expression: numb
     channel: descriptor.midiChannel,
     delta: gap,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
   trackState.expression = clampedExpression;
 }
 
@@ -85,7 +86,8 @@ export function addPCMPan(host: MidiConverter, key: string, pan: number, current
 
   const descriptor = host.resolveDescriptor(key);
   const trackState = host.getTrack(descriptor.id);
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
+  const rawTick = host.samplesToTicks(currentTime);
+  const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
   const gap = Math.max(0, currentTick - trackState.cursor);
   trackState.track.addEvent(new MidiWriter.ControllerChangeEvent({
     controllerNumber: 10,
@@ -93,7 +95,7 @@ export function addPCMPan(host: MidiConverter, key: string, pan: number, current
     channel: descriptor.midiChannel,
     delta: gap,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
 }
 
 /** 左のみ/両方/右のみを CC10 の 0/64/127 に正規化して送る。 */
@@ -104,10 +106,11 @@ export function addPan(host: MidiConverter, key: string, hasLeft: boolean, hasRi
   if (state) state.pan = pan;
   const descriptor = host.resolveDescriptor(key);
   const trackState = host.getTrack(descriptor.id);
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
+  const rawTick = host.samplesToTicks(currentTime);
+  const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
   const gap = Math.max(0, currentTick - trackState.cursor);
   trackState.track.addEvent(new MidiWriter.ControllerChangeEvent({ controllerNumber: 10, controllerValue: pan, channel: descriptor.midiChannel, delta: gap }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
 }
 
 export function addPitchBend(
@@ -119,10 +122,17 @@ export function addPitchBend(
 ): void {
   const descriptor = host.resolveDescriptor(key);
   const trackState = host.getTrack(descriptor.id);
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
+  const rawTick = host.samplesToTicks(currentTime);
+  // Continuous pitch curves (vibrato/slides) must never be quantized onto discrete musical beat grids
+  const currentTick = Math.max(trackState.cursor, rawTick);
   const gap = Math.max(0, currentTick - trackState.cursor);
   const midiChannel = descriptor.midiChannel;
   const bend = Math.max(-1, Math.min(1, semitoneOffset / semitoneRange));
+
+  // Deduplicate redundant identical pitch bends at zero delta
+  if (gap === 0 && trackState.lastPitchBend !== undefined && Math.abs(trackState.lastPitchBend - bend) < 1e-4) {
+    return;
+  }
 
   // PitchBendEvent is the one midi-writer-js channel event that expects 0-based input.
   trackState.track.addEvent(new MidiWriter.PitchBendEvent({
@@ -130,7 +140,8 @@ export function addPitchBend(
     channel: midiChannel - 1,
     delta: gap,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
+  trackState.lastPitchBend = bend;
 }
 
 export function noteOnPercussion(
@@ -142,23 +153,27 @@ export function noteOnPercussion(
   pitch = GM_CLOSED_HI_HAT_NOTE
 ): void {
   const descriptor = host.resolveDescriptor(key);
+  const trackState = host.getTrack(descriptor.id);
+  const rawTick = host.samplesToTicks(currentTime);
+  const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
+  const resolvedTick = Math.max(currentTick, trackState.cursor);
   activeNotes.set(descriptor.id, {
     note: pitch,
     startTime: currentTime,
     startVolume: velocity,
+    startTick: resolvedTick,
   });
 
-  const trackState = host.getTrack(descriptor.id);
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-  const gap = Math.max(0, currentTick - trackState.cursor);
+  const gap = Math.max(0, resolvedTick - trackState.cursor);
   trackState.track.addEvent(new MidiWriter.NoteOnEvent({
     pitch,
     velocity: Math.max(1, Math.min(100, velocity)),
     channel: descriptor.midiChannel,
     wait: `T${gap}`,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
   host.generatedNoteCount += 1;
+  host.onsets.push(currentTime);
   registerDescriptorStart(host, descriptor, currentTime);
 }
 
@@ -188,16 +203,20 @@ export function noteOnPCMPercussion(
     ...(isLoop || durationSamples === undefined ? {} : { durationSamples }),
     ...(dataBlock?.lengthBytes === undefined ? {} : { dataLengthBytes: dataBlock.lengthBytes }),
   });
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-  const gap = Math.max(0, currentTick - trackState.cursor);
+  const rawTick = host.samplesToTicks(currentTime);
+  const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
+  const resolvedTick = Math.max(currentTick, trackState.cursor);
+  trackState.pcmStartTick = resolvedTick;
+  const gap = Math.max(0, resolvedTick - trackState.cursor);
   trackState.track.addEvent(new MidiWriter.NoteOnEvent({
     pitch,
     velocity: Math.max(1, Math.min(100, velocity)),
     channel: descriptor.midiChannel,
     wait: `T${gap}`,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
   host.generatedNoteCount += 1;
+  host.onsets.push(currentTime);
   registerDescriptorStart(host, descriptor, currentTime);
   host.activePCMNotes.set(descriptor.id, pitch);
   return descriptor.id;
@@ -208,15 +227,18 @@ export function noteOffPCMPercussion(host: MidiConverter, key: string, pitch: nu
   const trackState = host.getTrack(descriptor.id);
   trackState.pcmEvents ??= [];
   trackState.pcmEvents.push({ type: 'stop', sampleTime: currentTime });
-  const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-  const gap = Math.max(0, currentTick - trackState.cursor);
+  const rawTick = host.samplesToTicks(currentTime);
+  const startTick = trackState.pcmStartTick ?? 0;
+  const snapped = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
+  const resolvedTick = snapped >= startTick ? snapped : Math.max(rawTick, startTick);
+  const gap = Math.max(0, resolvedTick - trackState.cursor);
   trackState.track.addEvent(new MidiWriter.NoteOffEvent({
     pitch,
     velocity: 64,
     channel: descriptor.midiChannel,
     duration: `T${gap}`,
   }));
-  trackState.cursor = currentTick;
+  trackState.cursor += gap;
   registerDescriptorStop(host, descriptor.id);
   host.activePCMNotes.delete(descriptor.id);
 }
@@ -357,11 +379,18 @@ export function noteOn(
   if (midiNote > 0 && midiNote < 128) {
     state.midiNote = midiNote;
     state.baseMidiNote = midiNote; // Capture base note
-    activeNotes.set(descriptor.id, { note: midiNote, startTime: currentTime, startVolume: state.volume });
 
     const trackState = host.getTrack(descriptor.id);
-    const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-    const gap = Math.max(0, currentTick - trackState.cursor);
+    const rawTick = host.samplesToTicks(currentTime);
+    const currentTick = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
+    const resolvedTick = Math.max(currentTick, trackState.cursor);
+    activeNotes.set(descriptor.id, {
+      note: midiNote,
+      startTime: currentTime,
+      startVolume: state.volume,
+      startTick: resolvedTick,
+    });
+    const gap = Math.max(0, resolvedTick - trackState.cursor);
 
     // Simple velocity mapping
     let velocity = 80;
@@ -413,7 +442,9 @@ export function noteOn(
     const exactMidiNote = frequencyToExactMidi(freq);
     const semitoneOffset = exactMidiNote - midiNote;
     const bendRange = host.pitchBendRangeForKey(key);
-    const bend = Math.max(-1, Math.min(1, semitoneOffset / bendRange));
+    const preserveTuning = host.options.preserveChipTuning !== false;
+    state.initialTuningOffset = preserveTuning ? 0 : semitoneOffset;
+    const bend = preserveTuning ? Math.max(-1, Math.min(1, semitoneOffset / bendRange)) : 0;
     let eventGap = gap;
     // CC11 is persistent channel state. Reset it at every Note On so the previous
     // note's FM TL envelope does not attenuate the new TL-derived velocity a second time.
@@ -427,24 +458,32 @@ export function noteOn(
       trackState.expression = 127;
       eventGap = 0;
     }
-    trackState.track.addEvent(new MidiWriter.PitchBendEvent({
-        bend,
-        channel: midiCh - 1,
-        delta: eventGap
-    }));
 
-    // Note On immediately follows (delta 0 since gap used by PitchBend)
+    // Only emit pitch bend if preserving chip tuning or if channel was previously bent away from 0
+    const needsPitchBend = preserveTuning || (trackState.lastPitchBend !== undefined && Math.abs(trackState.lastPitchBend) > 1e-4);
+    if (needsPitchBend) {
+      trackState.track.addEvent(new MidiWriter.PitchBendEvent({
+          bend,
+          channel: midiCh - 1,
+          delta: eventGap
+      }));
+      trackState.lastPitchBend = bend;
+      eventGap = 0;
+    }
+
+    // Note On immediately follows (delta 0 if gap was absorbed by pitch bend/CC, else eventGap)
     trackState.track.addEvent(new MidiWriter.NoteOnEvent({
         pitch: midiNote,
         velocity: velocity,
         channel: midiCh,
-        wait: `T0`
+        wait: `T${eventGap}`
     }));
     host.generatedNoteCount += 1;
+    host.onsets.push(currentTime);
     registerDescriptorStart(host, descriptor, currentTime);
 
     // Advance cursor
-    trackState.cursor = currentTick;
+    trackState.cursor += gap;
   }
 }
 
@@ -460,8 +499,11 @@ export function noteOff(
     const noteInfo = activeNotes.get(descriptor.id)!;
     // We don't need duration from start time anymore, just delta from last event (cursor)
     const trackState = host.getTrack(descriptor.id);
-    const currentTick = samplesToTicks(currentTime, host.options.tempo!, host.sampleRate);
-    const gap = Math.max(0, currentTick - trackState.cursor);
+    const rawTick = host.samplesToTicks(currentTime);
+    const startTick = noteInfo.startTick ?? (trackState.cursor - 1);
+    const snapped = host.options.snapToGrid ? snapTickToMusicalGrid(rawTick) : rawTick;
+    const resolvedTick = snapped > startTick ? snapped : Math.max(rawTick, startTick + 1);
+    const gap = Math.max(0, resolvedTick - trackState.cursor);
 
     const midiCh = descriptor.midiChannel;
 
@@ -472,7 +514,7 @@ export function noteOff(
         duration: `T${gap}` // 'duration' is the wait/delta for NoteOffEvent
     }));
 
-    trackState.cursor = currentTick;
+    trackState.cursor += gap;
     activeNotes.delete(descriptor.id);
     registerDescriptorStop(host, descriptor.id);
   }
@@ -490,21 +532,13 @@ export function updateNotePitch(
     const newExactNote = frequencyToExactMidi(freq);
 
     if (activeNotes.has(key)) {
-        const diff = newExactNote - state.baseMidiNote;
-
-        // Dynamic Threshold Logic:
-        // Bass (psg_2) uses the full standard ±2-semitone MIDI bend range to allow
-        // "decayed sustain" pitch slides without clipping the bend value.
-        // Melody channels need a tight threshold (e.g. 0.8) so that actual notes (semitones)
-        // are retriggered as new notes, not bent.
-        const isContinuousPSG = key.startsWith('psg_') || key.startsWith('ay8910_')
-          || key.startsWith('huc6280_') || key.startsWith('gbdmg_') || key.includes('_ssg_');
-        const threshold = isContinuousPSG ? CHIP_PITCH_BEND_RANGE : (key === 'psg_2' ? 2 : 0.8);
+        const tuningOffset = state.initialTuningOffset ?? 0;
+        const diff = (newExactNote - state.baseMidiNote) - tuningOffset;
+        const threshold = (key === 'psg_2' || key.endsWith('_psg_2')) ? 3 : 0.8;
 
         if (Math.abs(diff) <= threshold) {
             addPitchBend(host, key, diff, host.pitchBendRangeForKey(key), currentTime);
         } else {
-            // Large pitch change -> Retrigger
             noteOff(host, key, midiChannelOffset, currentTime, activeNotes);
             noteOn(host, key, midiChannelOffset, currentTime, activeNotes);
         }

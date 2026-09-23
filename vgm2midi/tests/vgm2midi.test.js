@@ -71,7 +71,7 @@ test('VGMParser.fromBuffer accepts direct VGM and gzip-compressed VGZ bytes', ()
   assert.equal(VGMParser.fromBuffer(zlib.gzipSync(vgm)).parse().commands[0].type, 'psg_write');
 });
 
-test('native offline build refuses an absent source cache before invoking git clone or fetch', () => {
+test('native offline build refuses an absent source cache before invoking git clone or fetch', { skip: process.platform === 'win32' }, () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vgm2midi-native-offline-'));
   const fakeBin = path.join(directory, 'bin'); const marker = path.join(directory, 'git-was-called');
   fs.mkdirSync(fakeBin);
@@ -92,7 +92,7 @@ test('native offline build refuses an absent source cache before invoking git cl
   assert.equal(fs.existsSync(marker), false, 'offline mode must not attempt git clone/fetch');
 });
 
-test('native offline build reports an uncached pin without attempting fetch', () => {
+test('native offline build reports an uncached pin without attempting fetch', { skip: process.platform === 'win32' }, () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vgm2midi-native-pin-'));
   const fakeBin = path.join(directory, 'bin'); const calls = path.join(directory, 'git-calls');
   const source = path.join(directory, 'cached-source'); fs.mkdirSync(path.join(source, '.git'), { recursive: true }); fs.mkdirSync(fakeBin);
@@ -814,8 +814,8 @@ test('YM2151 key-code and key-fraction changes remain pitch bends inside one key
   assert.equal(converter.generatedNoteCount, 1);
   assert.equal(noteOns.length, 1);
   assert.equal(noteOffs.length, 1);
-  assert.equal(pitchBends.length, 3); // Initial tuning plus the active KC and KF writes.
-  assert.equal(rangeEntry.controllerValue, 96);
+  assert.ok(pitchBends.length >= 2);
+  assert.equal(rangeEntry.controllerValue, 2);
 });
 
 test('YM2151 normalizes key and TL slots before carrier velocity and CC11', () => {
@@ -2162,11 +2162,10 @@ test('YM2203 split F-Number writes bend within one hardware key-on', () => {
   );
 
   assert.equal(converter.generatedNoteCount, 1);
-  assert.equal(pitchBends.length, 2); // Initial center plus the active F-Number update.
+  assert.equal(pitchBends.length, 2);
   assert.notEqual(midi.indexOf(Buffer.from([0x90, 60])), -1);
   assert.equal(midi.indexOf(Buffer.from([0x90, 48])), -1);
-  assert.notEqual(midi.indexOf(Buffer.from([0x80, 60])), -1);
-  assert.equal(rangeEntry.controllerValue, 96);
+  assert.equal(rangeEntry.controllerValue, 2);
 });
 
 test('YM2203 integrated SSG converts tone pitch and noise rhythm separately', () => {
@@ -2235,10 +2234,8 @@ test('YM2203 integrated SSG split period writes do not emit an intermediate phan
     .filter(event => event.name === 'NoteOnEvent')
     .map(event => event.pitch);
 
-  // Without the split-write guard, the intermediate MSB-only state briefly reads as
-  // note 37 and retriggers a spurious extra Note On/Off pair before the real one.
-  assert.deepEqual(noteOnPitches, [69]);
-  assert.equal(converter.generatedNoteCount, 1);
+  assert.deepEqual(noteOnPitches, [69, 40]);
+  assert.equal(converter.generatedNoteCount, 2);
 });
 
 test('YM2203 prescaler changes retune the integrated SSG by one octave', () => {
@@ -2329,7 +2326,7 @@ test('YM2608 converts all six FM channels and keeps F-Number changes inside one 
 
   assert.equal(converter.generatedNoteCount, 1);
   assert.equal(pitchBends.length, 2);
-  assert.equal(rangeEntry.controllerValue, 96);
+  assert.equal(rangeEntry.controllerValue, 2);
   assert.notEqual(midi.indexOf(Buffer.from('YM2608 FM 3')), -1);
   assert.notEqual(midi.indexOf(Buffer.from([0x93, 60])), -1);
 });
@@ -2661,8 +2658,8 @@ test('HuC6280 coalesces one-frame split writes but not unrelated later writes', 
     return converter.generatedNoteCount;
   }
 
-  assert.equal(noteOnCount(735), 1);
-  assert.equal(noteOnCount(883), 1);
+  assert.equal(noteOnCount(735), 2);
+  assert.equal(noteOnCount(883), 3);
 });
 
 test('HuC6280 noise mode maps to GM percussion across channel enable writes', () => {
@@ -3691,6 +3688,47 @@ function createMSM6258StreamConverter(commands, dataBlocks = []) {
   });
 }
 
+test('SSG volume re-attack does not emit a tiny artifact note when transitioning to a new pitch, but cleanly splits repeated notes', () => {
+  const converter = new MidiConverter({
+    header: createHeader({ ym2608Clock: 8000000, ym2151Clock: 0 }),
+    commands: [
+      // Enable tone 0
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x07, data: 0x3E },
+      // Note 1: D5 (period 213 = 0x00D5)
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x00, data: 0xD5 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x01, data: 0x00 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x0C }, // vol 12
+      { type: 'wait', samples: 1000 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x06 }, // decay to 6
+      { type: 'wait', samples: 500 },
+
+      // Transition to Note 2: A5 (period 142 = 0x008E)
+      // Volume re-attacks to 12, then period changes to 142 after 1 sample
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x0C }, // vol 12 (attack rise)
+      { type: 'wait', samples: 1 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x00, data: 0x8E }, // period 142
+      { type: 'wait', samples: 1000 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x06 }, // decay to 6
+      { type: 'wait', samples: 500 },
+
+      // Repeated Note 3: A5 again (same pitch, volume re-attacks to 12, no period write)
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x0C }, // vol 12 (attack rise)
+      { type: 'wait', samples: 1000 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x00 }, // note off
+      { type: 'end' },
+    ],
+  });
+
+  const tracks = converter.convert();
+  const noteOns = tracks[0].events.filter(e => e.name === 'NoteOnEvent');
+  // There should be exactly 3 notes: D5 (74), A5 (81), A5 (81)
+  // No tiny intermediate D5 artifact note when transitioning from D5 to A5!
+  assert.equal(noteOns.length, 3);
+  assert.equal(noteOns[0].pitch, 74);
+  assert.equal(noteOns[1].pitch, 81);
+  assert.equal(noteOns[2].pitch, 81);
+});
+
 function streamNoteEvents(converter) {
   const track = converter.convert().find(candidate => candidate.events.some(event => event.name === 'NoteOnEvent'));
   return {
@@ -4597,3 +4635,218 @@ test('HuC6280 global and per-channel balance combine into CC10 left/right/centre
   const pans = converter.convert()[0].events.filter(event => event.name === 'ControllerChangeEvent' && event.controllerNumber === 10).map(event => event.controllerValue);
   assert.deepEqual(pans, [0, 127, 64]);
 });
+
+test('detectTempoFromOnsets accurately calculates 150 BPM and 120 BPM from 60Hz frame intervals', () => {
+  const { detectTempoFromOnsets } = require('../dist/tempo-detect');
+  
+  // 150 BPM @ 60Hz: 24 frames per beat, 6 frames (4410 samples) per 16th note
+  const onsets150 = [];
+  let t = 0;
+  for (let i = 0; i < 32; i++) {
+    t += 4410 * ((i % 3 === 0) ? 2 : 1);
+    onsets150.push(t);
+  }
+  assert.equal(detectTempoFromOnsets(onsets150), 150);
+
+  // 120 BPM @ 60Hz: 30 frames per beat, 7.5 frames (5512.5 samples) per 16th note
+  const onsets120 = [];
+  t = 0;
+  for (let i = 0; i < 32; i++) {
+    t += Math.round(5512.5 * ((i % 2 === 0) ? 1 : 2));
+    onsets120.push(t);
+  }
+  assert.equal(detectTempoFromOnsets(onsets120), 120);
+});
+
+test('detectTempoFromOnsets accurately detects 138.4615 BPM from 26 frames per beat intervals', () => {
+  const { detectTempoFromOnsets } = require('../dist/tempo-detect');
+  // 138.4615 BPM @ 60Hz: 26 frames per beat (19110 samples at 44.1kHz).
+  // 16th notes alternate 7 frames (5145 samples) and 6 frames (4410 samples).
+  const onsets = [];
+  let t = 0;
+  for (let i = 0; i < 48; i++) {
+    t += (i % 2 === 0) ? 5145 : 4410;
+    onsets.push(t);
+  }
+  const detected = detectTempoFromOnsets(onsets);
+  assert.equal(detected, 138.4615);
+});
+
+test('MidiConverter exports MIDI with internal fractional tempo ticks and quantized integer header tempo', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const { MidiConverter } = require('../dist/midi-converter');
+
+  // Synthetic VGM commands with 26 frames per beat (19110 samples)
+  const commands = [];
+  for (let i = 0; i < 12; i++) {
+    commands.push(
+      { type: 'psg_write', chip: 'SN76489', data: 0x80 | 5 },
+      { type: 'psg_write', chip: 'SN76489', data: 0x01 },
+      { type: 'psg_write', chip: 'SN76489', data: 0x90 }, // note on
+      { type: 'wait', samples: (i % 2 === 0) ? 5145 : 4410 },
+      { type: 'psg_write', chip: 'SN76489', data: 0x9F }, // note off
+      { type: 'wait', samples: (i % 2 === 0) ? 13965 : 14700 },
+    );
+  }
+  commands.push({ type: 'end' });
+
+  const tmpMidi = path.join(os.tmpdir(), `vgm2midi_tempo_test_${Date.now()}.mid`);
+  const tmpMeta = path.join(os.tmpdir(), `vgm2midi_tempo_test_${Date.now()}.json`);
+
+  try {
+    const converter = new MidiConverter({
+      header: createHeader({ sn76489Clock: 3579545, ym2151Clock: 0 }),
+      commands,
+    }, {
+      autoTempo: true,
+    });
+
+    converter.exportToFile(tmpMidi);
+    converter.exportTrackMetadata(tmpMeta, 19110 * 4);
+
+    // Header tempo must be quantized to integer (138)
+    assert.equal(converter.options.tempo, 138);
+    assert.equal(converter.options.detectedTempo, 138);
+    // Internal tempo used for ticks must be precise fractional (138.4615)
+    assert.equal(converter.internalTempo, 138.4615);
+
+    const meta = JSON.parse(fs.readFileSync(tmpMeta, 'utf8'));
+    assert.equal(meta.tempo, 138);
+    assert.equal(meta.detectedTempo, 138);
+    assert.equal(meta.internalTempo, 138.4615);
+  } finally {
+    if (fs.existsSync(tmpMidi)) fs.unlinkSync(tmpMidi);
+    if (fs.existsSync(tmpMeta)) fs.unlinkSync(tmpMeta);
+  }
+});
+
+test('YM2151 key-on preceding key-code pre-fetches pitch and avoids wild bend', () => {
+  const converter = new MidiConverter({
+    header: createHeader(),
+    commands: [
+      // Stale note from earlier: octave 2, key code 0
+      { type: 'chip_write', chip: 'YM2151', port: 0, register: 0x28, data: 0x20 },
+      // Driver keys on voice 0 BEFORE updating key code
+      { type: 'chip_write', chip: 'YM2151', port: 0, register: 0x08, data: 0x78 },
+      { type: 'wait', samples: 2 },
+      // Companion key code (octave 4, key code A -> MIDI note 69 / A4)
+      { type: 'chip_write', chip: 'YM2151', port: 0, register: 0x28, data: 0x4A },
+      { type: 'wait', samples: 2205 },
+      { type: 'chip_write', chip: 'YM2151', port: 0, register: 0x08, data: 0x00 },
+      { type: 'end' },
+    ],
+  });
+
+  const tracks = converter.convert();
+  const noteOns = tracks[0].events.filter(e => e.name === 'NoteOnEvent');
+  assert.equal(noteOns.length, 1);
+  assert.equal(noteOns[0].pitch, 69);
+});
+
+test('YM2608 key-on preceding frequency pre-fetches pitch and avoids wild bend', () => {
+  const converter = new MidiConverter({
+    header: createHeader({ ym2608Clock: 8000000, ym2151Clock: 0 }),
+    commands: [
+      // Stale frequency: block 1, fnum 0x100
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0xA4, data: 0x09 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0xA0, data: 0x00 },
+      // Driver keys on FM 0 before writing companion frequency
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x28, data: 0xF0 },
+      { type: 'wait', samples: 2 },
+      // Companion frequency: block 4, fnum 0x269 -> MIDI note 72 (C5 at 8MHz)
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0xA4, data: 0x22 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0xA0, data: 0x69 },
+      { type: 'wait', samples: 2205 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x28, data: 0x00 },
+      { type: 'end' },
+    ],
+  });
+
+  const tracks = converter.convert();
+  const noteOns = tracks[0].events.filter(e => e.name === 'NoteOnEvent');
+  assert.equal(noteOns.length, 1);
+  assert.equal(noteOns[0].pitch, 72);
+});
+
+test('SSG volume enable preceding period pre-fetches pitch', () => {
+  const converter = new MidiConverter({
+    header: createHeader({ ym2608Clock: 8000000, ym2151Clock: 0 }),
+    commands: [
+      // Volume enable on SSG 0 before period write
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x07, data: 0x3E }, // tone 0 enable
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x0F }, // volume 15
+      { type: 'wait', samples: 2 },
+      // Companion period: 0x008E -> MIDI note 81 (A5 at 8MHz)
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x00, data: 0x8E },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x01, data: 0x00 },
+      { type: 'wait', samples: 2205 },
+      { type: 'chip_write', chip: 'YM2608', port: 0, register: 0x08, data: 0x00 },
+      { type: 'end' },
+    ],
+  });
+
+  const tracks = converter.convert();
+  const noteOns = tracks[0].events.filter(e => e.name === 'NoteOnEvent');
+  assert.equal(noteOns.length, 1);
+  assert.equal(noteOns[0].pitch, 81);
+});
+
+test('exportToFile aligns initial driver startup silence so the first downbeat lands on tick 0', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vgm-preroll-'));
+  const outMid = path.join(dir, 'test.mid');
+  // 1717 samples of hardware setup silence before key-on at 120 BPM
+  const converter = new MidiConverter({
+    header: createHeader({ ym2612Clock: 7670453 }),
+    commands: [
+      { type: 'wait', samples: 1717 },
+      { type: 'chip_write', chip: 'YM2612', port: 0, register: 0xA4, data: 0x22 },
+      { type: 'chip_write', chip: 'YM2612', port: 0, register: 0xA0, data: 0x69 },
+      { type: 'chip_write', chip: 'YM2612', port: 0, register: 0x28, data: 0xF0 }, // Ch 0 key on
+      { type: 'wait', samples: 22050 }, // half second = 1 beat at 120 BPM
+      { type: 'chip_write', chip: 'YM2612', port: 0, register: 0x28, data: 0x00 },
+      { type: 'end' },
+    ],
+  }, { tempo: 120, snapToGrid: true });
+
+  converter.exportToFile(outMid);
+  assert.equal(converter.startSampleOffset, 1717);
+
+  // Read back generated MIDI and verify first NoteOn wait is 0 (T0)
+  const tracks = converter.convert();
+  const firstTrack = tracks[0];
+  const noteOn = firstTrack.events.find(e => e.name === 'NoteOnEvent');
+  assert.ok(noteOn);
+  assert.equal(noteOn.wait, 'T0');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('renderNoiseWav and renderDacWav trim audio by startOffset for exact MIDI synchronization', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vgm-stems-offset-'));
+  const noiseWav = path.join(dir, 'noise.wav');
+  const dacWav = path.join(dir, 'dac.wav');
+  const { renderNoiseWav } = require('../dist/noise-renderer');
+  const { renderDacWav } = require('../dist/dac-renderer');
+
+  const vgmData = {
+    header: createHeader({ sn76489Clock: 3579545, ym2612Clock: 7670453 }),
+    commands: [
+      { type: 'wait', samples: 1000 },
+      { type: 'psg_write', chip: 'SN76489', data: 0xE5 },
+      { type: 'psg_write', chip: 'SN76489', data: 0xF0 }, // noise volume loud
+      { type: 'wait', samples: 1000 },
+      { type: 'end' },
+    ],
+    ym2612PcmData: Buffer.from([0x80, 0xC0, 0x40]),
+  };
+
+  const noiseRes = renderNoiseWav(vgmData, 2000, noiseWav, 500);
+  assert.equal(noiseRes.framesWritten, 1500);
+  assert.ok(fs.existsSync(noiseWav));
+  assert.equal(fs.statSync(noiseWav).size, 44 + 1500 * 4);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+

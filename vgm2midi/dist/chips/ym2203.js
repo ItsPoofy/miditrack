@@ -42,13 +42,13 @@ function handleYM2203Write(host, cmd, currentTime, activeNotes, cmdIndex) {
     }
     if ((0, opn_shared_1.handleOPNTimbreWrite)(host, keyPrefix, 0, reg, data, currentTime))
         return;
-    if (handleYM2203KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes))
+    if (handleYM2203KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes, cmdIndex))
         return;
     if ((0, opn_shared_1.handleOPNCh3SpecialFrequencyWrite)(host, ch3Context, reg, data, currentTime, activeNotes, cmdIndex))
         return;
     updateYM2203Frequency(host, instance, reg, data, currentTime, activeNotes, cmdIndex);
 }
-function handleYM2203KeyWrite(host, context, data, register, currentTime, activeNotes) {
+function handleYM2203KeyWrite(host, context, data, register, currentTime, activeNotes, cmdIndex) {
     if (register !== 0x28)
         return false;
     const channel = data & 0x03;
@@ -63,6 +63,9 @@ function handleYM2203KeyWrite(host, context, data, register, currentTime, active
     state.keyOnMask = (data >> 4) & 0x0F;
     const shouldSound = state.keyOnMask !== 0;
     if (shouldSound && !state.active) {
+        if (cmdIndex !== undefined) {
+            host.peekUpcomingOPNFreq(cmdIndex, 'YM2203', 0, channel, context.instance);
+        }
         state.opnActivePitchScale = host.opnPitchScale(state);
         state.opnActiveVelocity = host.opnCarrierVelocity(state);
         state.active = true;
@@ -96,7 +99,7 @@ function updateYM2203Frequency(host, instance, reg, data, currentTime, activeNot
     const hadPendingUpdate = state.hasPendingFrequencyUpdate ?? false;
     state.hasPendingFrequencyUpdate = isSplitUpdate;
     if (state.active && !isSplitUpdate && (state.frequency !== oldFrequency || hadPendingUpdate)) {
-        host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2203_FM_PITCH_BEND_RANGE);
+        host.updateKeyBoundFMPitch(key, currentTime, activeNotes, midi_converter_1.YM2203_FM_PITCH_BEND_RANGE, channel);
     }
 }
 function updateYM2203Prescaler(host, instance, register, currentTime, activeNotes) {

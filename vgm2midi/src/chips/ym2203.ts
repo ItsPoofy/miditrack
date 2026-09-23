@@ -56,7 +56,7 @@ export function handleYM2203Write(
     return;
   }
   if (handleOPNTimbreWrite(host, keyPrefix, 0, reg, data, currentTime)) return;
-  if (handleYM2203KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes)) return;
+  if (handleYM2203KeyWrite(host, ch3Context, data, reg, currentTime, activeNotes, cmdIndex)) return;
   if (handleOPNCh3SpecialFrequencyWrite(
     host, ch3Context, reg, data, currentTime, activeNotes, cmdIndex
   )) return;
@@ -69,7 +69,8 @@ export function handleYM2203KeyWrite(
   data: number,
   register: number,
   currentTime: number,
-  activeNotes: ActiveNoteMap
+  activeNotes: ActiveNoteMap,
+  cmdIndex?: number
 ): boolean {
   if (register !== 0x28) return false;
   const channel = data & 0x03;
@@ -83,6 +84,9 @@ export function handleYM2203KeyWrite(
   state.keyOnMask = (data >> 4) & 0x0F;
   const shouldSound = state.keyOnMask !== 0;
   if (shouldSound && !state.active) {
+    if (cmdIndex !== undefined) {
+      host.peekUpcomingOPNFreq(cmdIndex, 'YM2203', 0, channel, context.instance);
+    }
     state.opnActivePitchScale = host.opnPitchScale(state);
     state.opnActiveVelocity = host.opnCarrierVelocity(state);
     state.active = true;
@@ -129,7 +133,7 @@ export function updateYM2203Frequency(
   const hadPendingUpdate = state.hasPendingFrequencyUpdate ?? false;
   state.hasPendingFrequencyUpdate = isSplitUpdate;
   if (state.active && !isSplitUpdate && (state.frequency !== oldFrequency || hadPendingUpdate)) {
-    host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2203_FM_PITCH_BEND_RANGE);
+    host.updateKeyBoundFMPitch(key, currentTime, activeNotes, YM2203_FM_PITCH_BEND_RANGE, channel);
   }
 }
 
