@@ -1162,25 +1162,27 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .playback-time {
   min-width: 164px;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
-  padding-inline: 8px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  place-items: center;
-  gap: 4px;
+  width: max-content;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding-inline: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   color: var(--digital-text);
   background: var(--neutral-10);
   border: 1px solid var(--neutral-40);
   border-radius: 6px;
   font-family: "DSEG7 Classic", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.025em;
-  line-height: 26px;
+  letter-spacing: 0.02em;
+  line-height: 30px;
   white-space: nowrap;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .playback-time-dot,
@@ -1197,23 +1199,24 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .player-volume-control {
   display: grid;
-  grid-template-columns: 26px 72px 34px;
+  grid-template-columns: 30px 76px 36px;
   align-items: center;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   overflow: hidden;
   background: var(--neutral-0);
   border: 1px solid var(--neutral-40);
   border-radius: 6px;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .player-volume-slider {
   min-width: 0;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   padding-inline: 6px;
   display: grid;
   align-items: center;
@@ -1228,10 +1231,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .player-mute-button {
-  width: 26px;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  width: 30px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   display: inline-grid;
   place-items: center;
   padding: 0;
@@ -1243,8 +1246,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .player-mute-button svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   fill: currentColor;
 }
 
@@ -1394,9 +1397,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .compact-stepper,
 .playback-controls {
   display: grid;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   overflow: hidden;
   color: var(--neutral-100);
   background: var(--neutral-0);
@@ -1407,24 +1410,24 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .pianoroll-zoom {
-  grid-template-columns: 24px 34px 24px;
+  grid-template-columns: 26px 36px 26px;
 }
 
 .compact-stepper {
-  grid-template-columns: 24px minmax(42px, auto) 24px;
+  grid-template-columns: 26px minmax(46px, auto) 26px;
 }
 
 .playback-controls {
-  grid-template-columns: repeat(4, 28px);
+  grid-template-columns: repeat(4, 30px);
 }
 
 :is(.pianoroll-zoom, .compact-stepper, .playback-controls) button,
 .pianoroll-zoom span,
 .transform-value {
   min-width: 0;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -1433,14 +1436,14 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border: 0;
   font: inherit;
   font-variant-numeric: tabular-nums;
-  line-height: 26px;
+  line-height: 30px;
   box-sizing: border-box;
 }
 
 :is(.pianoroll-zoom, .compact-stepper, .playback-controls) button {
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   cursor: pointer;
 }
 
@@ -1750,10 +1753,10 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
 /* Ghost Notes Toggle */
 .ghost-notes-toggle {
   margin-left: auto;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
-  padding: 0 10px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 12px;
   font-size: 11px;
   font-weight: 600;
   border-radius: 6px;
@@ -1993,10 +1996,10 @@ body.is-fullscreen .track-source-options label {
 
 .audition-toolbar,
 body.is-fullscreen .audition-toolbar {
-  height: 38px;
-  min-height: 38px;
-  max-height: 38px;
-  padding: 0 10px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 12px;
   background: var(--neutral-0);
   border: 1px solid var(--neutral-30);
   border-radius: 8px;
@@ -2004,10 +2007,19 @@ body.is-fullscreen .audition-toolbar {
   flex-direction: row !important;
   flex-wrap: nowrap !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 10px !important;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   box-sizing: border-box;
+}
+
+.audition-toolbar::-webkit-scrollbar,
+body.is-fullscreen .audition-toolbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .audition-toolbar .transform-controls,
@@ -2017,10 +2029,10 @@ body.is-fullscreen .audition-toolbar .transform-controls {
   flex-direction: row !important;
   flex-wrap: nowrap !important;
   align-items: center !important;
-  gap: 8px !important;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
+  gap: 12px !important;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
   flex-shrink: 0;
 }
 
