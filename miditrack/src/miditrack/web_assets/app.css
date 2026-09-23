@@ -153,6 +153,28 @@ button { color: inherit; }
   box-shadow: 0 2px 8px rgba(86, 116, 185, 0.25);
 }
 
+:root[data-theme="dark"] .app-header,
+:root:not([data-theme="light"]) .app-header,
+body.is-fullscreen .app-header {
+  background: var(--neutral-0);
+  color: var(--neutral-100);
+  border-bottom: 1px solid var(--neutral-30);
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .app-header h1,
+:root:not([data-theme="light"]) .app-header h1,
+body.is-fullscreen .app-header h1 {
+  text-shadow: none;
+  color: var(--neutral-100);
+}
+
+:root[data-theme="dark"] .app-header .header-subtitle,
+:root:not([data-theme="light"]) .app-header .header-subtitle,
+body.is-fullscreen .app-header .header-subtitle {
+  color: var(--neutral-60);
+}
+
 .header-inner {
   width: min(1000px, 100%);
   min-height: 38px;
@@ -215,6 +237,21 @@ button { color: inherit; }
   text-shadow: 0 1px rgba(0, 51, 102, 0.35);
 }
 
+:root[data-theme="dark"] .app-header .header-action-button,
+:root:not([data-theme="light"]) .app-header .header-action-button,
+body.is-fullscreen .app-header .header-action-button {
+  color: var(--neutral-100);
+  background: var(--neutral-10);
+  border: 1px solid var(--neutral-40);
+  text-shadow: none;
+}
+
+.app-header .header-action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .app-header .header-action-button.icon-button {
   width: 26px;
   height: 26px;
@@ -232,8 +269,22 @@ button { color: inherit; }
   box-shadow: 0 4px 12px rgba(0, 51, 102, 0.25);
 }
 
+:root[data-theme="dark"] .app-header .header-action-button:hover:not(:disabled),
+:root:not([data-theme="light"]) .app-header .header-action-button:hover:not(:disabled),
+body.is-fullscreen .app-header .header-action-button:hover:not(:disabled) {
+  background: var(--neutral-20);
+  border-color: var(--neutral-50);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
 .app-header .header-action-button:focus-visible {
   outline-color: #fff;
+}
+
+:root[data-theme="dark"] .app-header .header-action-button:focus-visible,
+:root:not([data-theme="light"]) .app-header .header-action-button:focus-visible,
+body.is-fullscreen .app-header .header-action-button:focus-visible {
+  outline-color: var(--brand);
 }
 
 .app-shell {
@@ -1079,8 +1130,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .playback-controls svg {
-  width: 20px;
-  height: 28px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
 }
 
@@ -1111,25 +1162,25 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .playback-time {
   min-width: 164px;
-  /* 再生コントロール側はボタンのmin-height 32px + このボーダー幅の分だけ
-     実際の高さが32pxを超える（box-sizing:border-boxでもボタンの中身が
-     min-heightを押し広げるため）。ここでも同じ実測高さに合わせておく。 */
-  min-height: 36px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   padding-inline: 8px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   place-items: center;
-  gap: 5px;
+  gap: 4px;
   color: var(--digital-text);
   background: var(--neutral-10);
-  border: 2px solid var(--neutral-40);
-  border-radius: 8px;
+  border: 1px solid var(--neutral-40);
+  border-radius: 6px;
   font-family: "DSEG7 Classic", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.025em;
-  line-height: 1;
+  line-height: 26px;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .playback-time-dot,
@@ -1146,19 +1197,24 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .player-volume-control {
   display: grid;
-  grid-template-columns: 32px minmax(72px, 96px) 38px;
+  grid-template-columns: 26px 72px 34px;
   align-items: center;
-  min-height: 32px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   overflow: hidden;
   background: var(--neutral-0);
-  border: 2px solid var(--neutral-40);
-  border-radius: 8px;
+  border: 1px solid var(--neutral-40);
+  border-radius: 6px;
+  box-sizing: border-box;
 }
 
 .player-volume-slider {
   min-width: 0;
-  min-height: 32px;
-  padding-inline: 8px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding-inline: 6px;
   display: grid;
   align-items: center;
   border-left: 1px solid var(--neutral-40);
@@ -1166,13 +1222,16 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .player-volume-slider input[type="range"] {
   width: 100%;
+  height: 14px;
   margin: 0;
   accent-color: var(--brand-dark);
 }
 
 .player-mute-button {
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   display: inline-grid;
   place-items: center;
   padding: 0;
@@ -1181,6 +1240,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border: 0;
   border-radius: 0;
   cursor: pointer;
+}
+
+.player-mute-button svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 .player-mute-button:hover:not(:disabled) {
@@ -1324,48 +1389,42 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   outline-offset: -4px;
 }
 
-.pianoroll-zoom {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 2;
-  grid-template-columns: 32px 44px 32px;
-  box-shadow: 0 2px 8px rgba(9, 30, 66, 0.2);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-/* マウスホバー中、またはズームボタン自体にキーボードフォーカスがある間
-   だけ表示する。常時表示だとピアノロール上のノート描画を隠してしまうため。 */
-.pianoroll-card:hover .pianoroll-zoom,
-.pianoroll-card:focus-within .pianoroll-zoom {
-  opacity: 1;
-  pointer-events: auto;
-}
 
 .pianoroll-zoom,
 .compact-stepper,
 .playback-controls {
   display: grid;
-  min-height: 32px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   overflow: hidden;
   color: var(--neutral-100);
   background: var(--neutral-0);
-  border: 2px solid var(--neutral-40);
-  border-radius: 8px;
+  border: 1px solid var(--neutral-40);
+  border-radius: 6px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.pianoroll-zoom {
+  grid-template-columns: 24px 34px 24px;
 }
 
 .compact-stepper {
-  grid-template-columns: 32px minmax(48px, auto) 32px;
+  grid-template-columns: 24px minmax(42px, auto) 24px;
 }
 
-.playback-controls { grid-template-columns: repeat(4, 32px); }
+.playback-controls {
+  grid-template-columns: repeat(4, 28px);
+}
 
 :is(.pianoroll-zoom, .compact-stepper, .playback-controls) button,
 .pianoroll-zoom span,
 .transform-value {
   min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -1374,10 +1433,14 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border: 0;
   font: inherit;
   font-variant-numeric: tabular-nums;
+  line-height: 26px;
+  box-sizing: border-box;
 }
 
 :is(.pianoroll-zoom, .compact-stepper, .playback-controls) button {
-  min-height: 32px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
   cursor: pointer;
 }
 
@@ -1536,8 +1599,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
      打ち消してしまう。同じ詳細度で明示的に上書きする。 */
   .settings-field-row.settings-field-row-3 { grid-template-columns: 1fr; }
   .settings-groups { grid-template-columns: 1fr; }
-  .audition-toolbar { align-items: flex-start; }
-  .transform-controls { width: 100%; margin-inline-start: 0; }
+  .audition-toolbar { align-items: center; }
+  .transform-controls { margin-inline-start: 0; }
   #convert-options.has-timing-group { grid-template-columns: 1fr; }
   #convert-options.has-timing-group > .convert-field:not([data-layout-group="timing"]) {
     grid-column: auto;
@@ -1608,17 +1671,13 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
 /* Export Dropdown Menu */
 .export-dropdown-container {
   position: relative;
-  display: inline-block;
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 .export-dropdown-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  font-weight: 600;
-  font-size: 12px;
-  border-radius: 6px;
 }
 .export-dropdown-btn .dropdown-caret {
   font-size: 10px;
@@ -1629,21 +1688,21 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
 }
 .export-dropdown-menu {
   position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 1000;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10000;
   min-width: 210px;
   background: var(--neutral-0);
   border: 1px solid var(--neutral-30);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 .export-dropdown-menu[hidden] {
-  display: none;
+  display: none !important;
 }
 .export-dropdown-item {
   display: flex;
@@ -1654,16 +1713,20 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: var(--neutral-90);
+  color: var(--neutral-100);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
   box-sizing: border-box;
 }
-.export-dropdown-item:hover {
+.export-dropdown-item:hover:not(:disabled) {
   background: var(--brand-light);
   color: var(--brand-dark);
+}
+.export-dropdown-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .export-filename-item {
   padding: 4px;
@@ -1680,22 +1743,31 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
   border: 1px solid var(--neutral-30);
   border-radius: 4px;
   background: var(--neutral-10);
-  color: var(--neutral-90);
+  color: var(--neutral-100);
   box-sizing: border-box;
 }
 
 /* Ghost Notes Toggle */
 .ghost-notes-toggle {
+  margin-left: auto;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 0 10px;
   font-size: 11px;
   font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--neutral-30);
-  background: var(--neutral-10);
-  color: var(--neutral-60);
+  border-radius: 6px;
+  border: 1px solid var(--neutral-40);
+  background: var(--neutral-0);
+  color: var(--neutral-80);
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.15s ease;
+  box-sizing: border-box;
 }
 .ghost-notes-toggle[aria-pressed="true"] {
   background: var(--brand-light);
@@ -1919,23 +1991,37 @@ body.is-fullscreen .track-source-options label {
   padding: 0 6px;
 }
 
+.audition-toolbar,
 body.is-fullscreen .audition-toolbar {
-  padding: 6px 12px;
+  height: 38px;
+  min-height: 38px;
+  max-height: 38px;
+  padding: 0 10px;
   background: var(--neutral-0);
   border: 1px solid var(--neutral-30);
   border-radius: 8px;
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 10px;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
   overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
 }
 
+.audition-toolbar .transform-controls,
 body.is-fullscreen .audition-toolbar .transform-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  flex-shrink: 0;
 }
 
 body.is-fullscreen .pianoroll-card {

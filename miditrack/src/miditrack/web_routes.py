@@ -1731,8 +1731,6 @@ def create_app(
             synced_path = raw_path
             if has_transform:
                 synced_path = _synced_stem(raw_path, label, stem_dir, speed, transpose)
-            if gain == 1.0:
-                return synced_path
             gained_path = work_dir / f"{label}_gain.wav"
             apply_gain_wav(synced_path, gained_path, gain, 44100)
             return gained_path

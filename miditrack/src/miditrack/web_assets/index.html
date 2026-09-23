@@ -36,6 +36,25 @@
         <button type="button" class="button small header-action-button" id="open-dialog-button" aria-haspopup="dialog" data-i18n>
           開く
         </button>
+        <span class="export-dropdown-container">
+          <button type="button" class="button small header-action-button export-dropdown-btn" id="export-dropdown-btn" aria-haspopup="menu" aria-expanded="false" disabled>
+            <span data-i18n>エクスポート</span>
+            <span class="dropdown-caret" aria-hidden="true">▾</span>
+          </button>
+          <span class="export-dropdown-menu" id="export-dropdown-menu" role="menu" hidden>
+            <span class="export-dropdown-item export-filename-item">
+              <input type="text" id="download-filename" placeholder="ファイル名" data-i18n-attr="placeholder">
+            </span>
+            <button type="button" class="export-dropdown-item" id="download-button" role="menuitem">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+              <span data-i18n>MIDIをエクスポート</span>
+            </button>
+            <button type="button" class="export-dropdown-item" id="download-wav-button" role="menuitem">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-4h2v4zm0-6H9V8h2v2zm4 6h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
+              <span data-i18n>WAVをエクスポート</span>
+            </button>
+          </span>
+        </span>
         <button type="button" class="button small header-action-button" id="fullscreen-toggle" aria-pressed="false">
           <span class="fullscreen-label-enter" data-i18n>全画面</span>
           <span class="fullscreen-label-exit" data-i18n>全画面を終了</span>
@@ -211,26 +230,6 @@
         <button type="button" class="button small ghost ghost-notes-toggle" id="ghost-notes-toggle" aria-pressed="true" title="Ghost Notes">
           Ghost Notes
         </button>
-
-        <div class="export-dropdown-container">
-          <button type="button" class="button primary small export-dropdown-btn" id="export-dropdown-btn" aria-haspopup="menu" aria-expanded="false">
-            <span data-i18n>エクスポート</span>
-            <span class="dropdown-caret" aria-hidden="true">▾</span>
-          </button>
-          <div class="export-dropdown-menu" id="export-dropdown-menu" role="menu" hidden>
-            <div class="export-dropdown-item export-filename-item">
-              <input type="text" id="download-filename" placeholder="ファイル名" data-i18n-attr="placeholder">
-            </div>
-            <button type="button" class="export-dropdown-item" id="download-button" role="menuitem">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
-              <span data-i18n>MIDIをエクスポート</span>
-            </button>
-            <button type="button" class="export-dropdown-item" id="download-wav-button" role="menuitem">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-4h2v4zm0-6H9V8h2v2zm4 6h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
-              <span data-i18n>WAVをエクスポート</span>
-            </button>
-          </div>
-        </div>
       </div>
       <div class="pianoroll-card">
         <canvas

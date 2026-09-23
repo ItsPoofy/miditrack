@@ -2133,29 +2133,119 @@ async function loadPianoroll() {
   }
 }
 
-function drawPianorollGrid(context, width, noteHeight, timelineWidth, scrollLeft) {
-  // 背景は表示設定に関わらず常に描く。グリッド線の表示ON/OFFは線だけを
-  // 丸ごとスキップし、背景色には影響しない。
-  context.fillStyle = cssColor("--pianoroll-background", "#fafbfc");
+function drawPianorollGrid(context, width, noteHeight, timelineWidth, scrollLeft, layout) {
+  // 1. Background fill
+  context.fillStyle = cssColor("--pianoroll-background", "#20262f");
   context.fillRect(0, 0, width, noteHeight);
+
+  const payload = state.pianoroll;
+  const isDark = document.documentElement.getAttribute("data-theme") !== "light";
+
+  // 2. Horizontal pitch lanes & octave divider lines (FL Studio key background)
+  if (layout && layout.minNote !== undefined && layout.noteSpan > 0) {
+    const firstPitch = Math.floor(layout.minNote);
+    const lastPitch = Math.ceil(layout.maxNote);
+    for (let pitch = firstPitch; pitch <= lastPitch; pitch += 1) {
+      const { top, height } = pianorollPitchBounds(pitch, layout);
+      if (top + height < 0 || top > noteHeight) continue;
+
+      if (isPianorollBlackKey(pitch)) {
+        // Darker tint for black key rows
+        context.fillStyle = isDark ? "rgba(0, 0, 0, 0.28)" : "rgba(0, 0, 0, 0.05)";
+        context.fillRect(0, top, width, height);
+      } else {
+        context.fillStyle = isDark ? "rgba(255, 255, 255, 0.02)" : "rgba(255, 255, 255, 0.4)";
+        context.fillRect(0, top, width, height);
+      }
+
+      // Horizontal lines
+      const y = Math.round(top + height) + 0.5;
+      context.lineWidth = 1;
+      if (pitch % 12 === 0) {
+        // Distinct octave divider line (C)
+        context.strokeStyle = isDark ? "rgba(255, 255, 255, 0.20)" : "rgba(0, 0, 0, 0.20)";
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+      } else {
+        // Subtle semitone divider line
+        context.strokeStyle = isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.06)";
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+      }
+    }
+  }
+
   if (!state.isPianorollGridVisible) return;
-  context.strokeStyle = cssColor("--pianoroll-grid-line", "#ebecf0");
-  context.lineWidth = 1;
-  context.beginPath();
-  const divisions = state.pianorollGridDivisions || 8;
-  for (let index = 1; index < divisions; index += 1) {
-    const x = Math.round(timelineWidth * index / divisions - scrollLeft) + 0.5;
-    if (x < 0 || x > width) continue;
-    context.moveTo(x, 0);
-    context.lineTo(x, noteHeight);
+
+  // 3. Vertical musical grid lines (measures, beats, steps)
+  if (payload && payload.durationSeconds > 0 && timelineWidth > 0) {
+    const bpm = Number(state.session?.bpm) || 120;
+    const secPerBeat = 60 / bpm;
+    const secPerBar = secPerBeat * 4;
+    const secPerStep = secPerBeat / 4;
+    const pxPerSec = timelineWidth / payload.durationSeconds;
+
+    const pxPerBeat = secPerBeat * pxPerSec;
+    const pxPerStep = secPerStep * pxPerSec;
+
+    const visibleStartSec = Math.max(0, (scrollLeft - 20) / pxPerSec);
+    const visibleEndSec = Math.min(payload.durationSeconds + secPerBar, (scrollLeft + width + 20) / pxPerSec);
+
+    // Step lines (16th notes): if spacing is at least 8px
+    if (pxPerStep >= 8) {
+      context.strokeStyle = isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)";
+      context.lineWidth = 1;
+      context.beginPath();
+      const firstStep = Math.floor(visibleStartSec / secPerStep);
+      const lastStep = Math.ceil(visibleEndSec / secPerStep);
+      for (let s = firstStep; s <= lastStep; s += 1) {
+        if (s % 4 === 0) continue;
+        const x = Math.round(s * secPerStep * pxPerSec - scrollLeft) + 0.5;
+        if (x >= 0 && x <= width) {
+          context.moveTo(x, 0);
+          context.lineTo(x, noteHeight);
+        }
+      }
+      context.stroke();
+    }
+
+    // Beat lines (every 1 beat): if spacing is at least 6px
+    if (pxPerBeat >= 6) {
+      context.strokeStyle = isDark ? "rgba(255, 255, 255, 0.10)" : "rgba(0, 0, 0, 0.10)";
+      context.lineWidth = 1;
+      context.beginPath();
+      const firstBeat = Math.floor(visibleStartSec / secPerBeat);
+      const lastBeat = Math.ceil(visibleEndSec / secPerBeat);
+      for (let b = firstBeat; b <= lastBeat; b += 1) {
+        if (b % 4 === 0) continue;
+        const x = Math.round(b * secPerBeat * pxPerSec - scrollLeft) + 0.5;
+        if (x >= 0 && x <= width) {
+          context.moveTo(x, 0);
+          context.lineTo(x, noteHeight);
+        }
+      }
+      context.stroke();
+    }
+
+    // Bar lines (every 4 beats / measure): strongly visible
+    context.strokeStyle = isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.28)";
+    context.lineWidth = 1;
+    context.beginPath();
+    const firstBar = Math.floor(visibleStartSec / secPerBar);
+    const lastBar = Math.ceil(visibleEndSec / secPerBar);
+    for (let bar = firstBar; bar <= lastBar; bar += 1) {
+      const x = Math.round(bar * secPerBar * pxPerSec - scrollLeft) + 0.5;
+      if (x >= 0 && x <= width) {
+        context.moveTo(x, 0);
+        context.lineTo(x, noteHeight);
+      }
+    }
+    context.stroke();
   }
-  // 横線は縦グリッドの分割数設定とは独立に、常に6分割のまま音高の目安を示す。
-  for (let index = 1; index < 6; index += 1) {
-    const y = Math.round(noteHeight * index / 6) + 0.5;
-    context.moveTo(0, y);
-    context.lineTo(width, y);
-  }
-  context.stroke();
 }
 
 function updatePianorollKeyboardVisibility() {
@@ -2360,7 +2450,14 @@ function redrawPianorollStatic() {
   const hasPitchAutomation = payload.tracks.some((track) => track.pitchPaths?.length);
   const automationHeight = hasPitchAutomation ? Math.min(72, Math.max(48, size.height * 0.18)) : 0;
   const noteHeight = size.height - automationHeight;
-  drawPianorollGrid(context, size.width, noteHeight, timelineWidth, scrollLeft);
+  const layout = {
+    payload, offsets: pianorollFieldOffsets(payload), width: size.width, height: noteHeight,
+    timelineWidth, scrollLeft,
+    minNote: payload.minNote, maxNote: payload.maxNote,
+    noteSpan: payload.maxNote - payload.minNote + 3,
+    trackCount: payload.tracks.length, noteHeight, automationHeight,
+  };
+  drawPianorollGrid(context, size.width, noteHeight, timelineWidth, scrollLeft, layout);
   if (hasPitchAutomation) drawPitchAutomationGrid(context, { width: size.width, noteHeight, automationHeight });
   if (payload.noteCount > 0 && payload.durationSeconds > 0) {
     const mutedIndices = state.highlightedTrackIndex === null
@@ -2369,13 +2466,6 @@ function redrawPianorollStatic() {
       : new Set(payload.tracks
         .filter((track) => track.index !== state.highlightedTrackIndex)
         .map((track) => track.index));
-    const layout = {
-      payload, offsets: pianorollFieldOffsets(payload), width: size.width, height: noteHeight,
-      timelineWidth, scrollLeft,
-      minNote: payload.minNote, maxNote: payload.maxNote,
-      noteSpan: payload.maxNote - payload.minNote + 3,
-      trackCount: payload.tracks.length, noteHeight, automationHeight,
-    };
     for (const track of payload.tracks) drawPianorollTrack(context, track, layout, mutedIndices);
     drawPianorollKeyboard(layout);
   } else {
@@ -2616,8 +2706,8 @@ function handleSeekKeydown(event) {
 // 固定ステップではなく比例スケールにする。
 function handlePianorollWheel(event) {
   if (!state.pianoroll) return;
-  // Cmdキーを押しながらのホイール操作はズーム専用にする（シークとは排他）。
-  if (event.metaKey) {
+  // Ctrlキー、Cmdキー、またはAltキーを押しながらのホイール操作はズーム専用にする（シークとは排他）。
+  if (event.ctrlKey || event.metaKey || event.altKey) {
     event.preventDefault();
     state.pianorollZoomWheelDelta -= event.deltaY;
     while (Math.abs(state.pianorollZoomWheelDelta) >= PIANOROLL_ZOOM_WHEEL_THRESHOLD) {
@@ -2757,9 +2847,11 @@ function setupPianoroll() {
     } else if (pitch !== null && seconds !== null) {
       const activeTrack = getActiveTrackPayload();
       if (activeTrack) {
-        const snapSec = 0.25;
+        const bpm = Number(state.session?.bpm) || 120;
+        const beatSec = 60 / bpm;
+        const snapSec = beatSec / 4;
         const newStart = Math.max(0, Math.round(seconds / snapSec) * snapSec);
-        const newDur = snapSec;
+        const newDur = beatSec;
         const newOffset = activeTrack.notes.length;
         activeTrack.notes.push(newStart, newDur, pitch, 100);
         activeTrack.noteCount = activeTrack.notes.length / 4;
@@ -2787,15 +2879,21 @@ function setupPianoroll() {
       const activeTrack = getActiveTrackPayload();
       if (activeTrack && currentSeconds !== null) {
         const edit = state.activeNoteEdit;
+        const bpm = Number(state.session?.bpm) || 120;
+        const snapSec = (60 / bpm) / 4;
         if (edit.mode === "move" && currentPitch !== null) {
           const deltaSec = currentSeconds - edit.startSeconds;
           const deltaPitch = currentPitch - edit.startPitch;
-          activeTrack.notes[edit.offset] = Math.max(0, edit.origStart + deltaSec);
+          const rawStart = edit.origStart + deltaSec;
+          const snappedStart = Math.max(0, Math.round(rawStart / snapSec) * snapSec);
+          activeTrack.notes[edit.offset] = snappedStart;
           activeTrack.notes[edit.offset + 2] = Math.max(0, Math.min(127, edit.origPitch + deltaPitch));
           redrawPianorollStatic();
         } else if (edit.mode === "resize") {
           const deltaSec = currentSeconds - edit.startSeconds;
-          activeTrack.notes[edit.offset + 1] = Math.max(0.05, edit.origDuration + deltaSec);
+          const rawDur = edit.origDuration + deltaSec;
+          const snappedDur = Math.max(snapSec, Math.round(rawDur / snapSec) * snapSec);
+          activeTrack.notes[edit.offset + 1] = snappedDur;
           redrawPianorollStatic();
         }
       }

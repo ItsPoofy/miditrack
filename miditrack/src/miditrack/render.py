@@ -147,7 +147,7 @@ def render_wav(
         if not fluidsynth_bin or not sf:
             raise RenderError("fluidsynth or soundfont not available on Windows")
 
-        gain = os.environ.get("MIDITRACK_FLUIDSYNTH_GAIN", "1.0")
+        gain = os.environ.get("MIDITRACK_FLUIDSYNTH_GAIN", "0.35")
         cmd = [
             str(fluidsynth_bin),
             "-ni",

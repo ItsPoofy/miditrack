@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         "synth.dynamic-sample-loading=1",
     ])
-    gain_val = args.gain if args.gain is not None else "1.0"
+    gain_val = args.gain if args.gain is not None else "0.35"
     cmd.extend(["-g", str(gain_val)])
     cmd.extend([
         "-F",
