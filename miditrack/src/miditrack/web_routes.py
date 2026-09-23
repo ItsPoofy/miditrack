@@ -520,6 +520,134 @@ def create_app(
         )
 
 
+    @app.post("/api/realtime/config")
+    def realtime_config() -> Response:
+        from .realtime_player import player_engine
+
+        body = request.get_json(silent=True) or {}
+        stype = body.get("soundSourceType")
+        device_id = body.get("midiDeviceId")
+        if device_id is not None:
+            try:
+                device_id = int(device_id)
+            except (ValueError, TypeError):
+                device_id = 0
+        sf_path = web_session.soundfont_override or soundfont
+        player_engine.configure(
+            sound_source_type=stype,
+            midi_device_id=device_id,
+            soundfont_path=sf_path,
+        )
+        return jsonify(
+            soundSourceType=player_engine.sound_source_type,
+            midiDeviceId=player_engine.midi_device_id,
+        )
+
+    def _ensure_realtime_loaded(force: bool = False) -> None:
+        from .realtime_player import player_engine
+
+        if web_session.original_path and web_session.original_path.is_file():
+            sf_path = web_session.soundfont_override or soundfont
+            player_engine.configure(soundfont_path=sf_path)
+            if (
+                force
+                or getattr(player_engine, "loaded_revision", None) != web_session.midi_revision
+                or not player_engine.events
+            ):
+                player_engine.load_midi(
+                    web_session.original_path,
+                    speed=web_session.speed_ratio,
+                    transpose=web_session.transpose_semitones,
+                    assignments=dict(web_session.assignments),
+                    volumes=dict(web_session.volumes),
+                    channels=dict(web_session.track_channels),
+                )
+                player_engine.loaded_revision = web_session.midi_revision
+
+    @app.post("/api/realtime/play")
+    def realtime_play() -> Response:
+        from .realtime_player import player_engine
+
+        web_session.require_tracks()
+        body = request.get_json(silent=True) or {}
+        start_sec = float(body.get("startSeconds", 0.0))
+        if not player_engine.events:
+            _ensure_realtime_loaded()
+        player_engine.play(start_sec)
+        return jsonify(
+            playing=True,
+            currentTime=player_engine.get_current_time(),
+            duration=player_engine.duration,
+        )
+
+    @app.post("/api/realtime/pause")
+    def realtime_pause() -> Response:
+        from .realtime_player import player_engine
+
+        player_engine.pause()
+        return jsonify(
+            playing=False,
+            currentTime=player_engine.get_current_time(),
+            duration=player_engine.duration,
+        )
+
+    @app.post("/api/realtime/seek")
+    def realtime_seek() -> Response:
+        from .realtime_player import player_engine
+
+        body = request.get_json(silent=True) or {}
+        sec = float(body.get("seconds", 0.0))
+        if not player_engine.events:
+            _ensure_realtime_loaded()
+        player_engine.seek(sec)
+        return jsonify(
+            playing=player_engine.is_playing,
+            currentTime=player_engine.get_current_time(),
+            duration=player_engine.duration,
+        )
+
+    @app.post("/api/realtime/mute")
+    def realtime_mute() -> Response:
+        from .realtime_player import player_engine
+
+        body = request.get_json(silent=True) or {}
+        track_index = int(body.get("trackIndex", 0))
+        muted = bool(body.get("muted", False))
+        player_engine.set_track_mute(track_index, muted)
+        return jsonify(trackIndex=track_index, muted=muted)
+
+    @app.post("/api/realtime/solo")
+    def realtime_solo() -> Response:
+        from .realtime_player import player_engine
+
+        body = request.get_json(silent=True) or {}
+        track_index = int(body.get("trackIndex", 0))
+        solo = bool(body.get("solo", False))
+        player_engine.set_track_solo(track_index, solo)
+        return jsonify(trackIndex=track_index, solo=solo)
+
+    @app.post("/api/realtime/volume")
+    def realtime_volume() -> Response:
+        from .realtime_player import player_engine
+
+        body = request.get_json(silent=True) or {}
+        track_index = int(body.get("trackIndex", 0))
+        volume = int(body.get("volumePercent", 100))
+        player_engine.set_track_volume(track_index, volume)
+        return jsonify(trackIndex=track_index, volumePercent=volume)
+
+    @app.get("/api/realtime/status")
+    def realtime_status() -> Response:
+        from .realtime_player import player_engine
+
+        return jsonify(
+            playing=player_engine.is_playing,
+            currentTime=player_engine.get_current_time(),
+            duration=player_engine.duration,
+            soundSourceType=player_engine.sound_source_type,
+            midiDeviceId=player_engine.midi_device_id,
+        )
+
     @app.patch("/api/session/transform")
     def update_transform() -> Response:
         body = request.get_json(silent=True) or {}

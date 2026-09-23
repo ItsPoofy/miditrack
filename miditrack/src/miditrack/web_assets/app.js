@@ -193,6 +193,11 @@ const state = {
   playbackTimeFrameId: null,
   pointerActivatedControl: null,
   renderMode: "quality",
+  realtimeActive: true,
+  realtimePlaying: false,
+  realtimeCurrentTime: 0,
+  realtimeStartPerf: 0,
+  realtimeDuration: 0,
   soundSourceType: "soundfont",
   audioDriver: "wasapi",
   audioOutputDevice: "default",
@@ -440,6 +445,14 @@ async function loadPreferences() {
     applyPianorollHeight();
     applyPianorollColors();
     syncSettingsDialogControls();
+    apiFetch("/api/realtime/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soundSourceType: state.soundSourceType || "soundfont",
+        midiDeviceId: state.midiOutputDevice || 0,
+      }),
+    }).catch(() => {});
     state.ensemblePresets = payload.ensemblePresets || [];
     renderEnsemblePresetOptions();
   } catch (_error) {
@@ -705,7 +718,61 @@ function sourceFromPayload(payload) {
   };
 }
 
+function getRealtimeSeconds() {
+  if (state.realtimePlaying) {
+    const elapsed = (performance.now() - state.realtimeStartPerf) / 1000;
+    return Math.min(state.realtimeDuration || getTimelineDuration(), state.realtimeCurrentTime + elapsed);
+  }
+  return state.realtimeCurrentTime;
+}
+
+async function startRealtimePlayback() {
+  const current = getRealtimeSeconds();
+  try {
+    const res = await apiFetch("/api/realtime/play", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startSeconds: current }),
+    });
+    const data = await res.json();
+    state.realtimePlaying = true;
+    state.realtimeCurrentTime = data.currentTime;
+    state.realtimeDuration = data.duration;
+    state.realtimeStartPerf = performance.now();
+    startPlaybackTimeAnimation();
+    updatePlaybackControls();
+  } catch (err) {
+    showStatus(err.message, "error");
+  }
+}
+
+async function pauseRealtimePlayback() {
+  state.realtimePlaying = false;
+  state.realtimeCurrentTime = getRealtimeSeconds();
+  stopPlaybackTimeAnimation();
+  updatePlaybackControls();
+  try {
+    await apiFetch("/api/realtime/pause", { method: "POST" });
+  } catch (_e) {}
+}
+
+async function seekRealtimePlayback(seconds) {
+  state.realtimeCurrentTime = Math.max(0, Math.min(state.realtimeDuration || getTimelineDuration(), seconds));
+  state.realtimeStartPerf = performance.now();
+  updatePlaybackProgress();
+  try {
+    await apiFetch("/api/realtime/seek", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ seconds: state.realtimeCurrentTime }),
+    });
+  } catch (_e) {}
+}
+
 function sourceGlobalSeconds(player = activePlayer(), source = state.activeSource) {
+  if (state.realtimeActive) {
+    return getRealtimeSeconds();
+  }
   return (source?.timelineStartSeconds || 0) + (player.currentTime || 0);
 }
 
@@ -1451,6 +1518,13 @@ async function buildTrackRow(track, rowState = state) {
       slider.setAttribute("aria-valuetext", value.value);
       if (Number(slider.value) > 0) volumeBeforeMute = Number(slider.value);
       updateMuteButton();
+      if (state.realtimeActive) {
+        apiFetch("/api/realtime/volume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trackIndex: track.index, volumePercent: Number(slider.value) }),
+        }).catch(() => {});
+      }
     });
     slider.addEventListener("change", () => {
       onVolumeChange(track.index, Number(slider.value));
@@ -1459,6 +1533,13 @@ async function buildTrackRow(track, rowState = state) {
       const willMute = Number(slider.value) !== 0;
       slider.value = willMute ? "0" : String(volumeBeforeMute);
       slider.dispatchEvent(new Event("input", { bubbles: true }));
+      if (state.realtimeActive) {
+        apiFetch("/api/realtime/mute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trackIndex: track.index, muted: willMute }),
+        }).catch(() => {});
+      }
       onVolumeChange(track.index, Number(slider.value));
       if (isBulkApplyEvent(event)) {
         applyMuteToAllTracks(willMute, track.index);
@@ -1875,6 +1956,26 @@ function setupEnsemblePresets() {
 // 指定トラック以外を音量0にしてレンダリング・再生する「ソロ試聴」を
 // 開始／解除する。もう一度同じボタンを押すと解除に切り替わる。
 async function toggleTrackSolo(trackIndex) {
+  if (state.realtimeActive) {
+    const isEntering = state.soloTrackIndex !== trackIndex;
+    state.soloTrackIndex = isEntering ? trackIndex : null;
+
+    apiFetch("/api/realtime/solo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackIndex, solo: isEntering }),
+    }).catch(() => {});
+
+    for (const row of state.trackRows) {
+      if (row.soloButton) {
+        const isThisSolo = isEntering && row.index === trackIndex;
+        row.soloButton.classList.toggle("is-solo", isThisSolo);
+        row.soloButton.title = isThisSolo ? t("ソロ試聴を解除") : t("このトラックだけを試聴");
+      }
+    }
+    redrawPianorollStatic();
+    return;
+  }
   if (state.soloOperation) return state.soloOperation;
   const operation = state.soloTrackIndex === trackIndex
     ? exitSolo()
@@ -1998,7 +2099,9 @@ async function commitTrackEdits({ assignments, volumes, sources, channels, names
     // ことでイベントループがこの後の await の合間に一足早く拾えるように
     // なる。
     markRenderStale();
-    scheduleAutoRender();
+    if (!state.realtimeActive) {
+      scheduleAutoRender();
+    }
     await renderTrackList();
     redrawPianorollStatic();
     return true;
@@ -3891,6 +3994,14 @@ function isPlaybackShortcutBlocked(target) {
 // プレイヤーへ反映されるまで待ってから再生する。
 async function togglePlayback() {
   if (!state.session || state.session.tracks.length === 0 || document.body.classList.contains("busy")) return;
+  if (state.realtimeActive) {
+    if (state.realtimePlaying) {
+      await pauseRealtimePlayback();
+    } else {
+      await startRealtimePlayback();
+    }
+    return;
+  }
   const player = activePlayer();
   if (!player.paused) {
     player.pause();
@@ -3959,8 +4070,8 @@ function startPlaybackTimeAnimation() {
   const updateTime = () => {
     state.playbackTimeFrameId = null;
     updatePlaybackProgress();
-    const player = activePlayer();
-    if (!player.paused && !player.ended) {
+    const isPlaying = state.realtimeActive ? state.realtimePlaying : (!activePlayer().paused && !activePlayer().ended);
+    if (isPlaying) {
       state.playbackTimeFrameId = requestAnimationFrame(updateTime);
     }
   };
@@ -3988,6 +4099,11 @@ function updatePlayerVolume() {
 }
 
 function updatePlaybackProgress() {
+  if (state.realtimeActive && state.realtimePlaying) {
+    if (getRealtimeSeconds() >= getDisplayPlaybackDuration()) {
+      pauseRealtimePlayback();
+    }
+  }
   enforcePianorollLoop();
   updatePianorollPlayhead();
   updatePlaybackTime();
@@ -4006,6 +4122,16 @@ function enforcePianorollLoop() {
 }
 
 function seekPlaybackTo(seconds) {
+  if (state.realtimeActive) {
+    const target = Math.min(getTimelineDuration(), Math.max(0, seconds));
+    seekRealtimePlayback(target);
+    if (target <= 0.05) {
+      if (state.realtimePlaying) setPianorollAutoFollow(true);
+      scrollPianorollToStart();
+    }
+    updatePlaybackProgress();
+    return;
+  }
   const player = activePlayer();
   if (!state.session?.hasRender || !player.getAttribute("src")) return;
   const target = Math.min(getTimelineDuration(), Math.max(0, seconds));
@@ -4031,16 +4157,17 @@ function updatePlaybackControls() {
   const player = activePlayer();
   const isReady = !!(state.session && state.session.tracks.length > 0);
   const isBusy = document.body.classList.contains("busy");
-  const canSeek = isReady && !!state.session.hasRender && !!player.getAttribute("src") && !isBusy;
+  const canSeek = isReady && !isBusy && (state.realtimeActive || (!!state.session.hasRender && !!player.getAttribute("src")));
   $("#playback-backward").disabled = !canSeek;
   $("#playback-forward").disabled = !canSeek;
   $("#playback-start").disabled = !canSeek;
   $("#playback-toggle").disabled = !isReady || isBusy;
   $("#player-mute").disabled = !canSeek;
   $("#player-volume").disabled = !canSeek;
+  const isPlaying = state.realtimeActive ? state.realtimePlaying : (canSeek && !player.paused && !player.ended);
   $("#playback-toggle").setAttribute(
     "aria-pressed",
-    String(canSeek && !player.paused && !player.ended),
+    String(isPlaying),
   );
   updatePlaybackTime();
   updatePlayerVolume();
@@ -4751,6 +4878,17 @@ function setupSettingsDialog() {
   const sfSection = $("#sound-source-sf-section");
   const midiSection = $("#sound-source-midi-section");
 
+  function syncRealtimeConfig() {
+    apiFetch("/api/realtime/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soundSourceType: state.soundSourceType,
+        midiDeviceId: state.midiOutputDevice || 0,
+      }),
+    }).catch(() => {});
+  }
+
   function updateSoundSourceDisplay() {
     const isSoundfont = sfRadio ? sfRadio.checked : true;
     state.soundSourceType = isSoundfont ? "soundfont" : "midi";
@@ -4759,6 +4897,7 @@ function setupSettingsDialog() {
     if (midiLabel) midiLabel.classList.toggle("is-active-segment", !isSoundfont);
     if (sfSection) sfSection.style.display = isSoundfont ? "flex" : "none";
     if (midiSection) midiSection.style.display = isSoundfont ? "none" : "flex";
+    syncRealtimeConfig();
   }
 
   if (sfRadio && midiRadio) {
@@ -4805,6 +4944,7 @@ function setupSettingsDialog() {
       if (midiTabSelect) midiTabSelect.value = ssMidiSelect.value;
       state.midiOutputDevice = ssMidiSelect.value;
       savePreferenceFields({ midiOutputDevice: state.midiOutputDevice });
+      syncRealtimeConfig();
     });
   }
   if (midiTabSelect) {
@@ -4812,6 +4952,7 @@ function setupSettingsDialog() {
       if (ssMidiSelect) ssMidiSelect.value = midiTabSelect.value;
       state.midiOutputDevice = midiTabSelect.value;
       savePreferenceFields({ midiOutputDevice: state.midiOutputDevice });
+      syncRealtimeConfig();
     });
   }
 
