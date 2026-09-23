@@ -1,103 +1,71 @@
-# miditrack (Fork)
+# miditrack
 
-> A modern chiptune-to-MIDI workstation for Windows, macOS, and Linux.
+miditrack is a program that lets you convert retro video game music to MIDI and preview it.
 
-This is a fork of [Nihondo/miditrack](https://github.com/Nihondo/miditrack) with **full Windows compatibility**, **native desktop app support**, **automatic tempo detection**, **musical grid alignment**, and major audio engine QOL improvements.
+This is a fork of [Nihondo/miditrack](https://github.com/Nihondo/miditrack) with full Windows compatibility, quality-of-life improvements, and conversion accuracy fixes.
 
-Convert NES (`.nsf`/`.nsfe`), SNES (`.spc`/`.spc2`), and VGM/VGZ (`.vgm`/`.vgz`) into clean, editable MIDI with synchronized audio stems and an interactive piano roll.
+## Features
 
----
+- Converts NES (`.nsf`/`.nsfe`), SNES (`.spc`/`.spc2`), and VGM/VGZ (`.vgm`/`.vgz`) files to MIDI.
+- Built-in interactive piano roll and multi-track audio auditioning.
+- Automatic tempo and beat detection from rhythm events and hardware frame intervals.
+- Musical grid alignment and hardware sound driver startup latency compensation.
+- Sample-accurate audio stem synchronization for FM, DAC, and noise channels.
+- Fast previewing and instrument switching with dynamic SoundFont sample loading.
+- Native Windows desktop application with standalone executable bundling.
 
-## ⚡ What's New in this Fork
+## Setup and Build (Windows)
 
-- **Windows Desktop App & Standalone Executable**:
-  - Run natively on Windows via embedded WebView2 desktop GUI (`run_desktop.py`).
-  - Automated build script (`scripts/build_windows_exe.py`) packages everything into a standalone `miditrack.exe` with bundled helper binaries and default SoundFont.
-  - Native Windows CLI replacement for MIDI-to-WAV rendering (`midi2wav_cli.py`).
-- **Auto-Tempo & Beat Detection**:
-  - Intelligent BPM detection algorithm analyzing note onsets, rhythm events, and VGM frame deltas (`tempo-detect.ts`).
-  - No more manual tempo guesswork or off-tempo imports.
-- **Musical Grid Alignment & Hardware Preroll Compensation**:
-  - Compensates for retro sound engine driver startup latency (e.g. Genesis/YM2612 initialization delays).
-  - Downbeats land accurately on Bar 1 / Tick 0 rather than being locked into awkward off-grid fractions.
-- **Sample-Accurate Stem Synchronization**:
-  - Synced raw DAC and noise channel audio stems with FluidSynth rendered output.
-  - Exported per-track stems align sample-accurately without phase drift.
-- **Instant SoundFont Switching & Auditioning**:
-  - Dynamic sample loading enabled by default in FluidSynth, eliminating sluggish loading freezes when previewing or switching SoundFonts while preserving full 44.1 kHz audio quality.
-- **Cross-Platform Converter Portability**:
-  - Native Windows compilation fixes for `nsf2midi` (Windows module path detection) and `spc2midi` (MSVC build compatibility).
+### Prerequisites
 
----
+- Python 3.10+
+- Node.js 18+
+- [FluidSynth](https://www.fluidsynth.org/) (ensure `fluidsynth.exe` is in your PATH or installed to `C:\bin\fluidsynth.exe`)
 
-## 🚀 Quick Start
+### Running from Source
 
-### Windows
+1. Clone the repository:
+   ```powershell
+   git clone https://github.com/ItsPoofy/miditrack.git
+   cd miditrack
+   ```
 
-#### 1. Run from Source
-**Prerequisites**: Python 3.10+, Node.js 18+, and [FluidSynth](https://www.fluidsynth.org/) (ensure `fluidsynth.exe` is in your PATH or installed to `C:\bin\fluidsynth.exe`).
+2. Build the `vgm2midi` engine:
+   ```powershell
+   cd vgm2midi
+   npm install
+   npm run build
+   cd ..
+   ```
 
-```powershell
-# Clone the repository
-git clone https://github.com/ItsPoofy/miditrack.git
-cd miditrack
+3. Launch the desktop application:
+   ```powershell
+   uv run run_desktop.py
+   # or with standard python:
+   python -m pip install -e ./miditrack
+   python run_desktop.py
+   ```
 
-# Build vgm2midi
-cd vgm2midi
-npm install
-npm run build
-cd ..
+### Building the Standalone Executable
 
-# Launch the desktop app
-uv run run_desktop.py
-# or with standard python:
-python -m pip install -e ./miditrack
-python run_desktop.py
-```
+To bundle miditrack into a standalone Windows folder with `miditrack.exe`:
 
-#### 2. Build the Standalone Windows Executable
-To bundle `miditrack` into a single, standalone Windows folder with `miditrack.exe`:
 ```powershell
 python scripts/build_windows_exe.py
 ```
+
 The output package will be generated at `dist/miditrack/`.
 
----
+## Supported Formats
 
-### macOS & Linux
-
-**Prerequisites**: Python 3.10+, Node.js 18+, FluidSynth, and ffmpeg (`brew install fluid-synth ffmpeg rubberband uv`).
-
-```bash
-# Clone the repository
-git clone https://github.com/ItsPoofy/miditrack.git
-cd miditrack
-
-# Build vgm2midi
-cd vgm2midi
-npm install
-npm run build
-cd ..
-
-# Launch the server
-cd miditrack
-uv run miditrack
-```
-
----
-
-## 🎹 Supported Formats & Toolkit
-
-| Tool | Format | Typical Output | Key Enhancements in this Fork |
+| Tool | Format | Output | Description |
 |---|---|---|---|
-| **vgm2midi** | Genesis/MD, Arcade, SMS, GG, PC Engine (`.vgm`, `.vgz`) | Standard MIDI (`.mid`) + WAV stems | Auto tempo detection, startup preroll compensation, synchronized DAC/noise audio |
-| **spc2midi** | Super Nintendo / Super Famicom (`.spc`, `.spc2`) | Standard MIDI (`.mid`) + Game SoundFont (`.sf2`) | Native MSVC Windows build support, accurate instrument envelope extraction |
-| **nsf2midi** | NES / Famicom (`.nsf`, `.nsfe`) | Standard MIDI (`.mid`) | Native Windows executable path resolution, MDF instrument presets |
-| **miditrack** | All formats above & `.mid` files | Editable project, stems ZIP, master WAV | Native desktop window, low-latency auditioning, responsive piano roll |
+| **vgm2midi** | Sega Genesis/MD, Arcade, SMS, GG, PC Engine (`.vgm`, `.vgz`) | Standard MIDI (`.mid`) + WAV stems | Auto tempo detection, startup preroll compensation, synchronized DAC/noise audio |
+| **spc2midi** | Super Nintendo / Super Famicom (`.spc`, `.spc2`) | Standard MIDI (`.mid`) + Game SoundFont (`.sf2`) | Native MSVC build support, instrument envelope extraction |
+| **nsf2midi** | NES / Famicom (`.nsf`, `.nsfe`) | Standard MIDI (`.mid`) | Native Windows support, multi-track export, MDF presets |
+| **miditrack** | All formats above and `.mid` files | Editable project, stems ZIP, master WAV | Desktop window, low-latency auditioning, interactive piano roll |
 
----
-
-## 🛠️ CLI Usage
+## Command-Line Usage
 
 Converters can also be run directly from the command line:
 
@@ -114,22 +82,11 @@ nsf2midi song.nsf song.mid
 # SNES conversion with SoundFont extraction
 spc2midi song.spc song.mid --sf2
 
-# Fast MIDI-to-WAV rendering (Windows & POSIX)
-python -m miditrack.midi2wav_cli -s GeneralUser-GS.sf2 song.mid -o song.wav
+# Fast MIDI-to-WAV rendering
+python -m miditrack.midi2wav_cli -s SoundFont.sf2 song.mid -o song.wav
 ```
 
----
-
-## 📦 SoundFonts
-
-Place any General MIDI `.sf2` or `.sf3` SoundFont into one of the standard search directories, or select it directly from the UI:
-- **Windows**: `%USERPROFILE%\SoundFonts`, `C:\SoundFonts`, or inside `soundfonts/`
-- **macOS**: `~/Library/Audio/Sounds/Banks` or `/Library/Audio/Sounds/Banks`
-- **Linux**: `/usr/share/soundfonts` or `/usr/local/share/soundfonts`
-
----
-
-## 📜 Credits & License
+## Credits and License
 
 - Original project by [Nihondo](https://github.com/Nihondo/miditrack) (MIT License).
 - NES emulation core powered by [NotSoFatso](https://github.com/BleuBleu/FamiStudio).
