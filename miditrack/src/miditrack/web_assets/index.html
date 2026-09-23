@@ -28,8 +28,9 @@
 <body>
   <header class="app-header">
     <div class="header-inner">
-      <div>
+      <div class="header-brand">
         <h1>VGMidi</h1>
+        <span class="header-subtitle">Retro VGM to MIDI Converter</span>
       </div>
       <div class="header-actions" aria-label="表示操作" data-i18n-attr="aria-label">
         <button type="button" class="button small header-action-button" id="open-dialog-button" aria-haspopup="dialog" data-i18n>
@@ -99,27 +100,18 @@
       </div>
       <div class="table-scroll">
         <table class="track-table" role="table">
-          <caption class="visually-hidden" data-i18n>MIDIトラック一覧。列見出しで表示順を変更できます。</caption>
-          <thead role="rowgroup">
-            <tr role="row">
-              <th scope="col" role="columnheader" data-sort-key="channel" aria-sort="ascending"><button type="button" class="sort-button" data-sort-key="channel">ch<span class="sort-indicator" aria-hidden="true">▲</span></button></th>
-              <th scope="col" role="columnheader" data-sort-key="index"><button type="button" class="sort-button" data-sort-key="index" data-i18n>トラック<span class="sort-indicator" aria-hidden="true"></span></button></th>
-              <th scope="col" role="columnheader" data-sort-key="source"><button type="button" class="sort-button" data-sort-key="source" data-i18n>音源<span class="sort-indicator" aria-hidden="true"></span></button></th>
-              <th scope="col" role="columnheader" data-sort-key="instrument"><button type="button" class="sort-button" data-sort-key="instrument"><span class="track-instrument-header-label" data-i18n>楽器</span><span class="sort-indicator" aria-hidden="true"></span></button></th>
-              <th scope="col" role="columnheader" data-sort-key="volume"><button type="button" class="sort-button" data-sort-key="volume" data-i18n>音量<span class="sort-indicator" aria-hidden="true"></span></button></th>
-            </tr>
-          </thead>
+          <caption class="visually-hidden" data-i18n>MIDIトラック一覧</caption>
           <tbody id="track-list" role="rowgroup"></tbody>
         </table>
       </div>
       <p class="field-help" id="tracks-empty" data-i18n>MIDIを読み込むとここにトラック一覧が表示されます。</p>
       <div class="settings-panel">
-        <div class="field-group soundfont-field">
+        <div class="soundfont-field">
           <label class="field-label" for="soundfont-select">SoundFont</label>
           <div class="soundfont-row">
             <select id="soundfont-select" class="program-select"></select>
           </div>
-          <p class="field-help" id="soundfont-help"></p>
+          <p class="field-help" id="soundfont-help">FluidSynthの再生音色に使うSoundFont (.sf2 / .sf3) です。</p>
         </div>
       </div>
     </article>
@@ -147,8 +139,6 @@
             <svg class="playback-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h4v12H7V6zm6 0h4v12h-4V6z" /></svg>
           </button>
         </div>
-        <!-- スロットは常に16pxを確保する。中のスピナーだけをhiddenで切り替え、
-             レンダリング開始・終了で再生位置カウンタが横に動かないようにする。 -->
         <span class="render-spinner-slot" aria-hidden="true">
           <span class="render-spinner" id="render-spinner" hidden></span>
         </span>
@@ -161,37 +151,11 @@
             <span class="playback-time-whole">00:00</span><span class="playback-time-dot">.</span><span class="playback-time-decimal">000</span>
           </span>
         </output>
-        <!-- 試聴用<audio>を2枚（A/B）持つ。再レンダリング完了時に、鳴っている方を止めずに
-             もう一方へ短時間のクロスフェードで乗り換えるため（app.jsのcrossfadeToRender()）。
-             常にどちらか一方だけが「現在の再生源」（state.activePlayerId）で、
-             再生系のイベントリスナーは両方に張り、event.targetが現在のactivePlayer()と
-             一致する場合だけ処理する。 -->
+        <!-- 試聴用<audio>を2枚（player-a / player-b）の配置 -->
         <audio id="player-a" preload="metadata" hidden></audio>
         <audio id="player-b" preload="metadata" hidden></audio>
-        <div class="transform-controls" role="group" aria-label="全体の速度・ピッチ・試聴音量" data-i18n-attr="aria-label">
-          <div class="transform-control">
-            <span class="transform-control-label" data-i18n>速度</span>
-            <div class="compact-stepper">
-              <button type="button" id="transform-speed-down" aria-label="全体の速度倍率を下げる" data-i18n-attr="aria-label">−</button>
-              <label class="transform-value" for="transform-speed">
-                <span class="visually-hidden" data-i18n>全体の速度倍率</span>
-                <input type="number" id="transform-speed" value="1.0" min="0.1" max="10" step="0.1" inputmode="decimal">
-                <span aria-hidden="true">×</span>
-              </label>
-              <button type="button" id="transform-speed-up" aria-label="全体の速度倍率を上げる" data-i18n-attr="aria-label">＋</button>
-            </div>
-          </div>
-          <div class="transform-control">
-            <span class="transform-control-label" data-i18n>ピッチ</span>
-            <div class="compact-stepper">
-              <button type="button" id="transform-transpose-down" aria-label="全体のピッチを1半音下げる" data-i18n-attr="aria-label">−</button>
-              <label class="transform-value" for="transform-transpose">
-                <span class="visually-hidden" data-i18n>全体のピッチ（半音）</span>
-                <input type="number" id="transform-transpose" value="0" min="-24" max="24" step="1" inputmode="numeric">
-              </label>
-              <button type="button" id="transform-transpose-up" aria-label="全体のピッチを1半音上げる" data-i18n-attr="aria-label">＋</button>
-            </div>
-          </div>
+
+        <div class="transform-controls" role="group" aria-label="テンポ・試聴音量" data-i18n-attr="aria-label">
           <div class="transform-control">
             <span class="transform-control-label" data-i18n>テンポ</span>
             <div class="compact-stepper">
@@ -237,6 +201,36 @@
             <output class="player-volume-value" id="player-volume-value" for="player-volume">100%</output>
           </div>
         </div>
+
+        <div class="pianoroll-zoom" role="group" aria-label="ピアノロールの時間軸倍率" data-i18n-attr="aria-label">
+          <button type="button" id="pianoroll-zoom-out" aria-label="時間軸を縮小" disabled data-i18n-attr="aria-label">−</button>
+          <span id="pianoroll-zoom-value" aria-label="現在の時間軸倍率" data-i18n-attr="aria-label">1×</span>
+          <button type="button" id="pianoroll-zoom-in" aria-label="時間軸を拡大" disabled data-i18n-attr="aria-label">＋</button>
+        </div>
+
+        <button type="button" class="button small ghost ghost-notes-toggle" id="ghost-notes-toggle" aria-pressed="true" title="Ghost Notes">
+          Ghost Notes
+        </button>
+
+        <div class="export-dropdown-container">
+          <button type="button" class="button primary small export-dropdown-btn" id="export-dropdown-btn" aria-haspopup="menu" aria-expanded="false">
+            <span data-i18n>エクスポート</span>
+            <span class="dropdown-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="export-dropdown-menu" id="export-dropdown-menu" role="menu" hidden>
+            <div class="export-dropdown-item export-filename-item">
+              <input type="text" id="download-filename" placeholder="ファイル名" data-i18n-attr="placeholder">
+            </div>
+            <button type="button" class="export-dropdown-item" id="download-button" role="menuitem">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+              <span data-i18n>MIDIをエクスポート</span>
+            </button>
+            <button type="button" class="export-dropdown-item" id="download-wav-button" role="menuitem">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-4h2v4zm0-6H9V8h2v2zm4 6h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>
+              <span data-i18n>WAVをエクスポート</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="pianoroll-card">
         <canvas
@@ -270,67 +264,54 @@
           </div>
         </div>
         <p class="pianoroll-empty" id="pianoroll-empty" data-i18n>MIDIを読み込むとここに表示されます。</p>
-        <div class="pianoroll-zoom" role="group" aria-label="ピアノロールの時間軸倍率" data-i18n-attr="aria-label">
-          <button type="button" id="pianoroll-zoom-out" aria-label="時間軸を縮小" disabled data-i18n-attr="aria-label">−</button>
-          <span id="pianoroll-zoom-value" aria-label="現在の時間軸倍率" data-i18n-attr="aria-label">1×</span>
-          <button type="button" id="pianoroll-zoom-in" aria-label="時間軸を拡大" disabled data-i18n-attr="aria-label">＋</button>
-        </div>
       </div>
       <div class="pianoroll-footer">
         <p class="field-help" id="pianoroll-status"></p>
       </div>
     </article>
 
-    <section class="card disabled-section output-card" id="output-card" aria-labelledby="output-card-title">
-      <div class="card-heading output-card-heading">
-        <span class="step-number">4</span>
-        <div>
-          <h2 id="output-card-title" data-i18n>出力</h2>
-        </div>
-      </div>
-      <div class="toolbar download-toolbar" aria-label="エクスポート" data-i18n-attr="aria-label">
-        <button type="button" class="button secondary" id="download-button" data-i18n>MIDIをエクスポート</button>
-        <button type="button" class="button secondary" id="download-wav-button" data-i18n>WAVをエクスポート</button>
-        <label class="transform-control-label" for="download-filename" data-i18n>保存ファイル名</label>
-        <input type="text" id="download-filename" placeholder="ファイル名" data-i18n-attr="placeholder">
-      </div>
-
-      <details class="output-panel">
-        <summary data-i18n>出力オプション</summary>
-        <div class="output-content">
-          <section class="output-section">
-            <h3 class="output-section-title" data-i18n>バリエーションをまとめて生成</h3>
-            <div class="convert-options">
-              <div class="convert-field">
-                <label for="variation-speeds" data-i18n>速度倍率（カンマ区切り）</label>
-                <input type="text" id="variation-speeds" value="1.2, 1.0, 0.8">
-              </div>
-              <div class="convert-field variation-transpose-field">
-                <label for="variation-transposes" data-i18n>ピッチ（半音、カンマ区切り）</label>
-                <div class="variation-transpose-row">
-                  <input type="text" id="variation-transposes" value="-2, -1, 0, 1, 2">
-                  <button type="button" class="button secondary" id="variation-button" data-i18n>バリエーションをZIPでエクスポート</button>
-                  <div class="convert-field is-checkbox">
-                    <input type="checkbox" id="variation-include-midi">
-                    <label for="variation-include-midi" data-i18n>ZIPにMIDIも含める</label>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-          <section class="output-section">
-            <h3 class="output-section-title" data-i18n>トラックごとに出力</h3>
-            <div class="toolbar">
-              <button type="button" class="button secondary" id="track-export-button" data-i18n>トラックごとにZIPでエクスポート</button>
-              <div class="convert-field is-checkbox" id="track-export-group-chip-field">
-                <input type="checkbox" id="track-export-group-chip">
-                <label for="track-export-group-chip" data-i18n>原曲の音源トラックを1つにまとめる</label>
-              </div>
-            </div>
-          </section>
-        </div>
-    </section>
   </main>
+
+  <dialog class="app-dialog export-options-dialog" id="export-options-dialog" aria-labelledby="export-options-dialog-title" tabindex="-1">
+    <div class="dialog-heading">
+      <h2 id="export-options-dialog-title" data-i18n>詳細出力オプション</h2>
+    </div>
+    <div class="output-content">
+      <section class="output-section">
+        <h3 class="output-section-title" data-i18n>バリエーションをまとめて生成</h3>
+        <div class="convert-options">
+          <div class="convert-field">
+            <label for="variation-speeds" data-i18n>速度倍率（カンマ区切り）</label>
+            <input type="text" id="variation-speeds" value="1.2, 1.0, 0.8">
+          </div>
+          <div class="convert-field variation-transpose-field">
+            <label for="variation-transposes" data-i18n>ピッチ（半音、カンマ区切り）</label>
+            <div class="variation-transpose-row">
+              <input type="text" id="variation-transposes" value="-2, -1, 0, 1, 2">
+              <button type="button" class="button secondary" id="variation-button" data-i18n>バリエーションをZIPでエクスポート</button>
+              <div class="convert-field is-checkbox">
+                <input type="checkbox" id="variation-include-midi">
+                <label for="variation-include-midi" data-i18n>ZIPにMIDIも含める</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="output-section">
+        <h3 class="output-section-title" data-i18n>トラックごとに出力</h3>
+        <div class="toolbar">
+          <button type="button" class="button secondary" id="track-export-button" data-i18n>トラックごとにZIPでエクスポート</button>
+          <div class="convert-field is-checkbox" id="track-export-group-chip-field">
+            <input type="checkbox" id="track-export-group-chip">
+            <label for="track-export-group-chip" data-i18n>原曲の音源トラックを1つにまとめる</label>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="toolbar" style="justify-content: flex-end; margin-top: 16px;">
+      <button type="button" class="button ghost small" id="export-options-dialog-close" data-i18n>閉じる</button>
+    </div>
+  </dialog>
 
   <dialog class="app-dialog upload-dialog" id="open-dialog" closedby="any" aria-labelledby="upload-card-title" tabindex="-1"></dialog>
 

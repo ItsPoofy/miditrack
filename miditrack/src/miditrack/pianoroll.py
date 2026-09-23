@@ -53,6 +53,16 @@ class _TempoMap:
             elapsed_ticks * self.tempos[index] / 1_000_000 / self.ticks_per_beat
         )
 
+    def to_ticks(self, seconds: float) -> int:
+        if seconds <= 0:
+            return 0
+        index = bisect_right(self.seconds, seconds) - 1
+        elapsed_seconds = seconds - self.seconds[index]
+        elapsed_ticks = round(
+            elapsed_seconds * 1_000_000 * self.ticks_per_beat / self.tempos[index]
+        )
+        return max(0, self.ticks[index] + elapsed_ticks)
+
 
 def _read_midi(path: Path) -> Any:
     mido = midi.import_mido()
@@ -326,3 +336,65 @@ def extract_notes(
     return _build_payload(
         midi_file, tempo_map, end_ticks, all_notes, unreleased_count, speed, transpose
     )
+
+
+def update_track_notes(
+    path: Path,
+    track_index: int,
+    raw_notes: list[float | int],
+    *,
+    speed: float = midi.DEFAULT_SPEED_RATIO,
+    stride: int = NOTE_STRIDE,
+) -> None:
+    """MIDIファイルの指定トラックのノート一覧を差し替えて保存する。"""
+    midi_file = _read_midi(path)
+    if not (0 <= track_index < len(midi_file.tracks)):
+        raise MidiTrackError(t("トラック番号が範囲外です: {track_index}", track_index=track_index))
+    tempo_map, _ = _build_tempo_map(midi_file, speed)
+    track = midi_file.tracks[track_index]
+
+    channel = 0
+    non_note_events: list[tuple[int, int, Any]] = []
+    current_tick = 0
+    for msg in track:
+        current_tick += msg.time
+        if msg.type in ("note_on", "note_off"):
+            channel = msg.channel
+        else:
+            non_note_events.append((current_tick, 0, msg))
+
+    mido = midi.import_mido()
+    note_events: list[tuple[int, int, Any]] = []
+    for offset in range(0, len(raw_notes), stride):
+        start_sec = float(raw_notes[offset])
+        dur_sec = float(raw_notes[offset + 1]) if offset + 1 < len(raw_notes) else 0.25
+        note_num = int(raw_notes[offset + 2]) if offset + 2 < len(raw_notes) else 60
+        vel = int(raw_notes[offset + 3]) if offset + 3 < len(raw_notes) else 100
+
+        note_num = max(0, min(127, note_num))
+        vel = max(1, min(127, vel))
+        start_tick = tempo_map.to_ticks(start_sec)
+        end_tick = tempo_map.to_ticks(start_sec + dur_sec)
+        if end_tick <= start_tick:
+            end_tick = start_tick + max(1, midi_file.ticks_per_beat // 8)
+
+        # 0 for note_off (processed before simultaneous note_on), 1 for note_on
+        note_events.append(
+            (end_tick, 0, mido.Message("note_off", note=note_num, velocity=0, channel=channel, time=0))
+        )
+        note_events.append(
+            (start_tick, 1, mido.Message("note_on", note=note_num, velocity=vel, channel=channel, time=0))
+        )
+
+    all_events = sorted(non_note_events + note_events, key=lambda item: (item[0], item[1]))
+
+    new_track = mido.MidiTrack()
+    prev_tick = 0
+    for tick, _, msg in all_events:
+        msg.time = tick - prev_tick
+        prev_tick = tick
+        new_track.append(msg)
+
+    midi_file.tracks[track_index] = new_track
+    midi_file.save(path)
+

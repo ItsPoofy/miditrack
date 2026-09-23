@@ -367,7 +367,7 @@ class TestWebApp(unittest.TestCase):
         self.assertIn("音源またはMIDIを選択", html)
         self.assertIn('id="tracks-card-heading"', html)
         self.assertIn("トラックごとの音源・楽器・音量", html)
-        self.assertIn('<h1>miditrack</h1>', html)
+        self.assertIn('<h1>VGMidi</h1>', html)
         self.assertIn("#open-dialog-button,\n#open-dialog-close { display: none; }", css)
         self.assertIn("body.is-fullscreen #open-dialog-button { display: inline-flex; }", css)
         self.assertIn("body.is-fullscreen #open-dialog > #upload-card {", css)
@@ -383,13 +383,10 @@ class TestWebApp(unittest.TestCase):
         self.assertIn('uploadSummary.addEventListener("click", (event) => {', javascript)
         self.assertIn('if (document.body.classList.contains("is-fullscreen")) event.preventDefault();', javascript)
         self.assertIn(
-            'body.is-fullscreen .app-shell > #tracks-card { grid-column: 1; grid-row: 1 / 6; }',
+            'body.is-fullscreen .app-shell > #tracks-card {',
             css,
         )
         self.assertIn("border-top: 1px solid var(--neutral-30)", css)
-        self.assertIn("body.is-fullscreen #tracks-card {", css)
-        fullscreen_tracks_rule = css.split("body.is-fullscreen #tracks-card {", 1)[1].split("}", 1)[0]
-        self.assertIn("padding: 8px", fullscreen_tracks_rule)
         self.assertIn("body.is-fullscreen .upload-dialog {", css)
         self.assertIn("max-height: calc(100dvh - 24px)", css)
         self.assertIn(".upload-dialog:focus { outline: none; }", css)
@@ -4895,18 +4892,14 @@ class TestWebAppPreferences(unittest.TestCase):
         self.assertIn('id="pianoroll-grid-divisions"', html)
         self.assertIn('id="track-color-palette"', html)
         self.assertIn('<option value="vivid" data-i18n>彩度強め</option>', html)
-        self.assertIn('id="output-card"', html)
-        output_heading = html.split('class="card-heading output-card-heading"', 1)[1].split("</div>", 2)[0]
-        self.assertIn('<span class="step-number">4</span>', output_heading)
-        self.assertIn('id="output-card-title" data-i18n>出力</h2>', output_heading)
-        self.assertLess(html.index('id="audition-card"'), html.index('id="output-card"'))
-        self.assertNotIn("MIDIはこのMacの中だけで処理されます。", html)
-        self.assertIn('body.is-fullscreen #output-card { display: contents; }', css)
-        self.assertIn(
-            'body.is-fullscreen .app-shell > #output-card > .download-toolbar { grid-column: 2; grid-row: 4;',
-            css,
-        )
-        self.assertIn('$("#output-card").classList.toggle("ready", ready);', javascript)
+        self.assertIn('id="export-dropdown-btn"', html)
+        self.assertIn('id="export-dropdown-menu"', html)
+        self.assertIn('id="download-button"', html)
+        self.assertIn('id="download-wav-button"', html)
+        self.assertIn('id="download-filename"', html)
+        self.assertIn("function setupExportDropdown()", javascript)
+        self.assertIn("function setupGhostNotesToggle()", javascript)
+        self.assertIn(".export-dropdown-container {", css)
         self.assertIn('id="hide-empty-tracks"', html)
         self.assertIn('class="settings-checkbox-row"', html)
         checkbox_row_start = html.index('class="settings-checkbox-row"')

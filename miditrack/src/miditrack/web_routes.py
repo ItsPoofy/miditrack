@@ -497,6 +497,23 @@ def create_app(
         body = request.get_json(silent=True) or {}
         return jsonify(**session_service.update_tracks(body))
 
+    @app.put("/api/session/tracks/<int:track_index>/notes")
+    def update_track_notes(track_index: int) -> Response:
+        body = request.get_json(silent=True) or {}
+        raw_notes = body.get("notes", [])
+        if not isinstance(raw_notes, list):
+            raise WebValidationError(t("notesは配列で指定してください"))
+        session_service.update_track_notes(track_index, raw_notes)
+        assert web_session.original_path is not None
+        return jsonify(
+            **pianoroll.extract_notes(
+                web_session.original_path,
+                speed=web_session.speed_ratio,
+                transpose=web_session.transpose_semitones,
+            )
+        )
+
+
     @app.patch("/api/session/transform")
     def update_transform() -> Response:
         body = request.get_json(silent=True) or {}

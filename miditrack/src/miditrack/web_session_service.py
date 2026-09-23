@@ -6,7 +6,7 @@ import dataclasses
 from pathlib import Path
 from typing import Any
 
-from . import midi, preferences, render
+from . import midi, pianoroll, preferences, render
 from .errors import WebValidationError
 from .gm import DEFAULT_GM_PROGRAM
 from .i18n import t
@@ -80,6 +80,27 @@ class SessionService:
             channels,
             names,
         )
+        self._session.invalidate_render()
+        return session_payload(self._session)
+
+    def update_track_notes(self, track_index: int, notes: list[float | int]) -> dict[str, Any]:
+        """指定トラックのノート一覧を差し替え、MIDIを再解析してレンダーを無効化する。"""
+        self._session.require_tracks()
+        if self._session.original_path is None:
+            raise WebValidationError(t("先にMIDIファイルをアップロードしてください"))
+        pianoroll.update_track_notes(
+            self._session.original_path,
+            track_index,
+            notes,
+            speed=self._session.speed_ratio,
+        )
+        mido = midi.import_mido()
+        midi_file = mido.MidiFile(self._session.original_path)
+        self._session.tracks = [
+            midi.analyze_track(tr, i) for i, tr in enumerate(midi_file.tracks)
+        ]
+        self._session.midi_revision += 1
+        self._session.source_midi_cache = None
         self._session.invalidate_render()
         return session_payload(self._session)
 
