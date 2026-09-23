@@ -36,6 +36,7 @@ document.documentElement.dataset.theme =
   matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 
 const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const query = new URLSearchParams(window.location.search);
 const queryToken = query.get("token") || "";
@@ -192,6 +193,18 @@ const state = {
   playbackTimeFrameId: null,
   pointerActivatedControl: null,
   renderMode: "quality",
+  soundSourceType: "soundfont",
+  audioDriver: "wasapi",
+  audioOutputDevice: "default",
+  audioSampleRate: 48000,
+  audioBufferSize: 480,
+  midiOutputDevice: "none",
+  enabledMidiInputs: [],
+  fluidsynthGain: 0.35,
+  chipStemGain: 1.0,
+  ym2612Dac: "hq",
+  ym2151Clock: "4000000",
+  sn76489Clock: "0x0009",
   autoRenderTimer: null,
   renderGeneration: 0,
   renderTask: null,
@@ -405,6 +418,18 @@ async function loadPreferences() {
     state.renderWorkers = RENDER_WORKER_OPTIONS.has(payload.renderWorkers)
       ? payload.renderWorkers
       : "auto";
+    state.soundSourceType = payload.soundSourceType === "midi" ? "midi" : "soundfont";
+    state.audioDriver = payload.audioDriver || "wasapi";
+    state.audioOutputDevice = payload.audioOutputDevice || "default";
+    state.audioSampleRate = Number(payload.audioSampleRate) || 48000;
+    state.audioBufferSize = Number(payload.audioBufferSize) || 480;
+    state.midiOutputDevice = payload.midiOutputDevice || "none";
+    state.enabledMidiInputs = Array.isArray(payload.enabledMidiInputs) ? payload.enabledMidiInputs : [];
+    state.fluidsynthGain = typeof payload.fluidsynthGain === "number" ? payload.fluidsynthGain : 0.35;
+    state.chipStemGain = typeof payload.chipStemGain === "number" ? payload.chipStemGain : 1.0;
+    state.ym2612Dac = payload.ym2612Dac || "hq";
+    state.ym2151Clock = payload.ym2151Clock || "4000000";
+    state.sn76489Clock = payload.sn76489Clock || "0x0009";
     $("#pianoroll-rounded-notes").checked = state.hasRoundedPianorollNotes;
     $("#pianoroll-outlined-notes").checked = state.hasOutlinedPianorollNotes;
     $("#pianoroll-show-keyboard").checked = state.isPianorollKeyboardVisible;
@@ -480,6 +505,40 @@ function syncSettingsDialogControls() {
   $("#pianoroll-grid-color").value =
     state.pianorollGridColor || cssColor("--pianoroll-grid-line", "#ebecf0");
   $("#render-workers").value = String(state.renderWorkers);
+
+  const sfRadio = $("#sound-source-soundfont");
+  const midiRadio = $("#sound-source-midi");
+  if (sfRadio && midiRadio) {
+    if (state.soundSourceType === "midi") {
+      midiRadio.checked = true;
+    } else {
+      sfRadio.checked = true;
+    }
+  }
+  const driverSel = $("#audio-driver-select");
+  if (driverSel && state.audioDriver) driverSel.value = state.audioDriver;
+  const sampleRateSel = $("#audio-sample-rate");
+  if (sampleRateSel && state.audioSampleRate) sampleRateSel.value = String(state.audioSampleRate);
+  const bufferSizeSel = $("#audio-buffer-size");
+  if (bufferSizeSel && state.audioBufferSize) bufferSizeSel.value = String(state.audioBufferSize);
+  const fsGain = $("#pref-fluidsynth-gain");
+  const fsGainVal = $("#pref-fluidsynth-gain-val");
+  if (fsGain && fsGainVal && state.fluidsynthGain) {
+    fsGain.value = String(state.fluidsynthGain);
+    fsGainVal.textContent = Number(state.fluidsynthGain).toFixed(2);
+  }
+  const chipGain = $("#pref-chip-stem-gain");
+  const chipGainVal = $("#pref-chip-stem-gain-val");
+  if (chipGain && chipGainVal && state.chipStemGain) {
+    chipGain.value = String(state.chipStemGain);
+    chipGainVal.textContent = Number(state.chipStemGain).toFixed(2);
+  }
+  const dacSel = $("#pref-ym2612-dac");
+  if (dacSel && state.ym2612Dac) dacSel.value = state.ym2612Dac;
+  const y2151Sel = $("#pref-ym2151-clock");
+  if (y2151Sel && state.ym2151Clock) y2151Sel.value = String(state.ym2151Clock);
+  const snSel = $("#pref-sn76489-clock");
+  if (snSel && state.sn76489Clock) snSel.value = state.sn76489Clock;
 }
 
 // 環境設定（表示設定・動作設定）の変更をサーバー側設定へ保存する。起動ごとに
@@ -796,6 +855,24 @@ function renderSoundfontOptions(payload) {
     }
   }
   select.value = payload.selected || "";
+
+  const prefSelect = $("#pref-soundfont-select");
+  if (prefSelect) {
+    if (itemsChanged || prefSelect.options.length === 0) {
+      prefSelect.innerHTML = "";
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = t("既定（自動選択）");
+      prefSelect.appendChild(defaultOption);
+      for (const item of (payload.items || [])) {
+        const option = document.createElement("option");
+        option.value = item.path;
+        option.textContent = item.name;
+        prefSelect.appendChild(option);
+      }
+    }
+    prefSelect.value = payload.selected || "";
+  }
 
   const help = $("#soundfont-help");
   if (help) {
@@ -2514,11 +2591,14 @@ function updatePianorollInteraction() {
 }
 
 function updatePianorollZoomControls() {
-  const zoomIndex = PIANOROLL_ZOOM_LEVELS.indexOf(state.pianorollZoom);
+  const zoomOut = $("#pianoroll-zoom-out");
+  const zoomIn = $("#pianoroll-zoom-in");
+  const zoomValue = $("#pianoroll-zoom-value");
+  if (!zoomOut && !zoomIn && !zoomValue) return;
   const canZoom = !!state.pianoroll?.durationSeconds;
-  $("#pianoroll-zoom-out").disabled = !canZoom || zoomIndex <= 0;
-  $("#pianoroll-zoom-in").disabled = !canZoom || zoomIndex >= PIANOROLL_ZOOM_LEVELS.length - 1;
-  $("#pianoroll-zoom-value").textContent = `${state.pianorollZoom}×`;
+  if (zoomOut) zoomOut.disabled = !canZoom || state.pianorollZoom <= 1.0;
+  if (zoomIn) zoomIn.disabled = !canZoom || state.pianorollZoom >= 16.0;
+  if (zoomValue) zoomValue.textContent = `${state.pianorollZoom.toFixed(1)}×`;
 }
 
 function setPianorollAutoFollow(isFollowing) {
@@ -2564,34 +2644,54 @@ function setPianorollZoom(zoom, shouldPreserveCenter = true) {
   const centerRatio = previousWidth > 0
     ? (scrollArea.scrollLeft + scrollArea.clientWidth / 2) / previousWidth
     : 0;
-  state.pianorollZoom = zoom;
-  timeline.style.inlineSize = `${zoom * 100}%`;
+  state.pianorollZoom = Math.min(16.0, Math.max(1.0, zoom));
+  timeline.style.inlineSize = `${state.pianorollZoom * 100}%`;
   updatePianorollZoomControls();
-  requestAnimationFrame(() => {
-    const nextWidth = timeline.getBoundingClientRect().width;
-    state.pianorollTimelineWidth = nextWidth;
-    scrollArea.scrollLeft = shouldPreserveCenter
-      ? centerRatio * nextWidth - scrollArea.clientWidth / 2
-      : 0;
-    redrawPianorollStatic();
-  });
+  const nextWidth = scrollArea.clientWidth * state.pianorollZoom;
+  state.pianorollTimelineWidth = nextWidth;
+  scrollArea.scrollLeft = shouldPreserveCenter
+    ? centerRatio * nextWidth - scrollArea.clientWidth / 2
+    : 0;
+  redrawPianorollStatic();
+}
+
+function zoomPianorollAt(clientX, zoomFactor) {
+  if (!state.pianoroll) return;
+  const timeline = $("#pianoroll-timeline");
+  const scrollArea = $("#pianoroll-scroll");
+  const rect = scrollArea.getBoundingClientRect();
+  const currentWidth = timeline.getBoundingClientRect().width;
+  if (currentWidth <= 0) return;
+
+  const mouseContentX = scrollArea.scrollLeft + (clientX - rect.left);
+  const anchorRatio = mouseContentX / currentWidth;
+
+  const oldZoom = state.pianorollZoom;
+  const newZoom = Math.min(16.0, Math.max(1.0, oldZoom * zoomFactor));
+  if (Math.abs(newZoom - oldZoom) < 0.001) return;
+
+  setPianorollAutoFollow(false);
+  state.pianorollZoom = newZoom;
+  timeline.style.inlineSize = `${newZoom * 100}%`;
+  updatePianorollZoomControls();
+
+  const nextWidth = scrollArea.clientWidth * newZoom;
+  state.pianorollTimelineWidth = nextWidth;
+  const newMouseContentX = anchorRatio * nextWidth;
+  scrollArea.scrollLeft = newMouseContentX - (clientX - rect.left);
+
+  redrawPianorollStatic();
 }
 
 function changePianorollZoom(direction) {
-  const currentIndex = PIANOROLL_ZOOM_LEVELS.indexOf(state.pianorollZoom);
-  const nextIndex = Math.min(
-    PIANOROLL_ZOOM_LEVELS.length - 1,
-    Math.max(0, currentIndex + direction),
-  );
-  if (nextIndex !== currentIndex) {
-    setPianorollAutoFollow(false);
-    setPianorollZoom(PIANOROLL_ZOOM_LEVELS[nextIndex]);
-  }
+  const step = direction > 0 ? 1.25 : 0.8;
+  setPianorollAutoFollow(false);
+  setPianorollZoom(state.pianorollZoom * step);
 }
 
 function resetPianorollZoom() {
   setPianorollAutoFollow(false);
-  setPianorollZoom(PIANOROLL_ZOOM_LEVELS[0], false);
+  setPianorollZoom(1.0, false);
 }
 
 function resizePianorollViewport() {
@@ -2709,12 +2809,8 @@ function handlePianorollWheel(event) {
   // Ctrlキー、Cmdキー、またはAltキーを押しながらのホイール操作はズーム専用にする（シークとは排他）。
   if (event.ctrlKey || event.metaKey || event.altKey) {
     event.preventDefault();
-    state.pianorollZoomWheelDelta -= event.deltaY;
-    while (Math.abs(state.pianorollZoomWheelDelta) >= PIANOROLL_ZOOM_WHEEL_THRESHOLD) {
-      const direction = state.pianorollZoomWheelDelta > 0 ? 1 : -1;
-      changePianorollZoom(direction);
-      state.pianorollZoomWheelDelta -= direction * PIANOROLL_ZOOM_WHEEL_THRESHOLD;
-    }
+    const factor = Math.exp(-event.deltaY * 0.002);
+    zoomPianorollAt(event.clientX, factor);
     return;
   }
   if (!state.session?.hasRender) return;
@@ -2957,8 +3053,8 @@ function setupPianoroll() {
   });
   canvas.addEventListener("wheel", handlePianorollWheel, { passive: false });
   document.addEventListener("keydown", handleSeekKeydown);
-  $("#pianoroll-zoom-out").addEventListener("click", () => changePianorollZoom(-1));
-  $("#pianoroll-zoom-in").addEventListener("click", () => changePianorollZoom(1));
+  $("#pianoroll-zoom-out")?.addEventListener("click", () => changePianorollZoom(-1));
+  $("#pianoroll-zoom-in")?.addEventListener("click", () => changePianorollZoom(1));
   $("#pianoroll-rounded-notes").addEventListener("change", (event) => {
     state.hasRoundedPianorollNotes = event.target.checked;
     redrawPianorollStatic();
@@ -3276,13 +3372,14 @@ async function handleUpload(files) {
 
 async function uploadMidi(file) {
   setBusy(true, t("読み込み中…"));
+  resetPlayer();
   const formData = new FormData();
   formData.append("midi", file);
   try {
     const response = await apiFetch("/api/session", { method: "POST", body: formData });
     resetPlayer();
     await refreshFromSession(await response.json());
-    showUploadCard();
+    hideUploadCard();
     showStatus(t("MIDIを読み込みました。"), "success");
   } catch (error) {
     showStatus(error.message, "error");
@@ -3293,13 +3390,14 @@ async function uploadMidi(file) {
 
 async function uploadSource(files) {
   setBusy(true, t("音源を解析中…"));
+  resetPlayer();
   const formData = new FormData();
   for (const file of files) formData.append("source", file);
   try {
     const response = await apiFetch("/api/source", { method: "POST", body: formData });
     resetPlayer();
     await refreshFromSession(await response.json());
-    showUploadCard();
+    openImportDialog();
     showStatus(t("音源を読み込みました。曲とオプションを選んで変換してください。"), "success");
   } catch (error) {
     showStatus(error.message, "error");
@@ -4255,7 +4353,7 @@ async function applyProjectImportPayload(payload) {
   await loadSoundfonts();
   if (payload.warnings?.length) showStatus(payload.warnings.join(" "));
   else showStatus(t("プロジェクトを読み込みました。"), "success");
-  showUploadCard();
+  hideUploadCard();
 }
 
 // "1.2, 0.8" のようなカンマ区切りテキストを数値配列にパースする。
@@ -4438,6 +4536,17 @@ function showUploadCard() {
   if (!document.body.classList.contains("is-fullscreen")) $("#upload-card").open = true;
 }
 
+// 表示モードに応じて、ファイル選択・変換ダイアログを開く。
+function openImportDialog() {
+  $("#upload-card").open = true;
+  if (!document.body.classList.contains("is-fullscreen")) return;
+  const dialog = $("#open-dialog");
+  if (dialog && !dialog.open) {
+    dialog.showModal();
+    dialog.focus({ preventScroll: true });
+  }
+}
+
 // Finder/Dockから音源を開いた直後は、変換オプションや曲選択をすぐ操作できる
 // ようにネイティブ版のファイル選択モーダルを開く。MIDI単体とプロジェクト復元は
 // 変換操作を必要としないため、この関数を呼ばない。
@@ -4494,26 +4603,290 @@ function setupOpenDialog() {
   }
 }
 
+let cachedDevices = null;
+
+async function loadSystemDevices() {
+  try {
+    const response = await apiFetch("/api/devices");
+    const data = await response.json();
+    cachedDevices = data;
+    renderSystemDevices(data);
+  } catch (err) {
+    console.warn("Failed to load system devices from API:", err);
+  }
+}
+
+function handleMidiInputToggle(devId, devName, isChecked) {
+  const currentEnabled = new Set(state.enabledMidiInputs || []);
+  if (isChecked) {
+    currentEnabled.add(devId);
+  } else {
+    currentEnabled.delete(devId);
+    currentEnabled.delete(devName);
+  }
+  state.enabledMidiInputs = Array.from(currentEnabled);
+  savePreferenceFields({ enabledMidiInputs: state.enabledMidiInputs });
+
+  $$(`input[data-midi-input="${devId}"]`).forEach((input) => {
+    input.checked = isChecked;
+  });
+}
+
+function renderSystemDevices(data) {
+  if (!data) return;
+  const audioOutputs = data.audio_outputs || [];
+  const midiOutputs = data.midi_outputs || [];
+  const midiInputs = data.midi_inputs || [];
+
+  // 1. Audio Outputs
+  const audioSelect = $("#audio-output-select");
+  if (audioSelect) {
+    const currentVal = state.audioOutputDevice || audioSelect.value || "default";
+    audioSelect.innerHTML = "";
+    audioOutputs.forEach((dev) => {
+      const opt = document.createElement("option");
+      opt.value = dev.id;
+      opt.textContent = dev.name;
+      audioSelect.appendChild(opt);
+    });
+    if (audioOutputs.some((d) => d.id === currentVal)) {
+      audioSelect.value = currentVal;
+    }
+  }
+
+  // 2. MIDI Outputs (Sound Source Tab & MIDI Tab)
+  const ssMidiSelect = $("#sound-source-midi-output");
+  const midiTabSelect = $("#midi-tab-output-select");
+  const currentMidiOut = state.midiOutputDevice || "none";
+
+  [ssMidiSelect, midiTabSelect].forEach((selectEl) => {
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    midiOutputs.forEach((dev) => {
+      const opt = document.createElement("option");
+      opt.value = dev.id;
+      opt.textContent = dev.name;
+      selectEl.appendChild(opt);
+    });
+    if (midiOutputs.some((d) => d.id === currentMidiOut)) {
+      selectEl.value = currentMidiOut;
+    }
+  });
+
+  // 3. MIDI Inputs (Sound Source Tab & MIDI Tab)
+  const ssInputsBox = $("#sound-source-midi-inputs");
+  const midiTabInputsBox = $("#midi-tab-inputs");
+  const enabledInputs = new Set(state.enabledMidiInputs || []);
+
+  [ssInputsBox, midiTabInputsBox].forEach((boxEl) => {
+    if (!boxEl) return;
+    boxEl.innerHTML = "";
+    if (midiInputs.length === 0) {
+      const emptyDiv = document.createElement("div");
+      emptyDiv.className = "settings-empty-note";
+      emptyDiv.textContent = "No MIDI input devices detected.";
+      boxEl.appendChild(emptyDiv);
+      return;
+    }
+    midiInputs.forEach((dev) => {
+      const label = document.createElement("label");
+      label.className = "settings-midi-row";
+      const chk = document.createElement("input");
+      chk.type = "checkbox";
+      chk.value = dev.id;
+      chk.dataset.midiInput = dev.id;
+      chk.checked = enabledInputs.has(dev.id) || enabledInputs.has(dev.name);
+      const span = document.createElement("span");
+      span.textContent = dev.name;
+      label.appendChild(chk);
+      label.appendChild(span);
+      boxEl.appendChild(label);
+
+      chk.addEventListener("change", () => {
+        handleMidiInputToggle(dev.id, dev.name, chk.checked);
+      });
+    });
+  });
+}
+
 // 歯車ボタンから開く環境設定ダイアログ（表示設定/動作設定の2グループ）の
 // 開閉と各コントロールを配線する。ダイアログ内の設定はすべて即時反映・
-// 即時保存で、OK/キャンセルの下書き状態は持たない（元からあった3つの
-// ピアノロールのチェックボックスと同じ挙動）。
+// 即時保存で、OK/キャンセルの下書き状態は持たない。
 function setupSettingsDialog() {
   const dialog = $("#settings-dialog");
-  // showModal()の既定動作は最初のフォーカス可能要素（テーマの<select>）へ
-  // 自動フォーカスしてしまう。#open-dialogと同じ対処で、ダイアログ本体
-  // （tabindex="-1"）へ明示的にフォーカスし、開いた直後にテーマの
-  // プルダウンが選択状態に見えないようにする。
   $("#settings-open").addEventListener("click", () => {
     dialog.showModal();
     dialog.focus({ preventScroll: true });
+    if (cachedDevices) renderSystemDevices(cachedDevices);
+    loadSystemDevices();
+    const activeBtn = $(".settings-tab-btn.is-active") || $(".settings-tab-btn");
+    if (activeBtn) activeBtn.click();
   });
   $("#settings-close").addEventListener("click", () => dialog.close());
-  // ダイアログを閉じると歯車ボタンへフォーカスが戻るため、
-  // closeイベント後にblur()してスペースキーで再生トグルを使えるようにする。
   dialog.addEventListener("close", () => {
     $("#settings-open").blur();
   });
+
+  // タブ切り替え
+  const tabBtns = $$(".settings-tab-btn");
+  const tabPanes = $$(".settings-tab-pane");
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tabName = btn.dataset.tab;
+      tabBtns.forEach((b) => b.classList.toggle("is-active", b === btn));
+      tabPanes.forEach((pane) => {
+        const isActive = pane.id === `settings-pane-${tabName}`;
+        pane.classList.toggle("is-active", isActive);
+        pane.hidden = !isActive;
+        pane.style.display = isActive ? "flex" : "none";
+      });
+    });
+  });
+
+  // Sound Source タブ: SoundFont vs MIDI 出力の切り替え
+  const sfRadio = $("#sound-source-soundfont");
+  const midiRadio = $("#sound-source-midi");
+  const sfLabel = $("#seg-label-soundfont");
+  const midiLabel = $("#seg-label-midi");
+  const sfSection = $("#sound-source-sf-section");
+  const midiSection = $("#sound-source-midi-section");
+
+  function updateSoundSourceDisplay() {
+    const isSoundfont = sfRadio ? sfRadio.checked : true;
+    state.soundSourceType = isSoundfont ? "soundfont" : "midi";
+    savePreferenceFields({ soundSourceType: state.soundSourceType });
+    if (sfLabel) sfLabel.classList.toggle("is-active-segment", isSoundfont);
+    if (midiLabel) midiLabel.classList.toggle("is-active-segment", !isSoundfont);
+    if (sfSection) sfSection.style.display = isSoundfont ? "flex" : "none";
+    if (midiSection) midiSection.style.display = isSoundfont ? "none" : "flex";
+  }
+
+  if (sfRadio && midiRadio) {
+    sfRadio.addEventListener("change", updateSoundSourceDisplay);
+    midiRadio.addEventListener("change", updateSoundSourceDisplay);
+    updateSoundSourceDisplay();
+  }
+
+  // Sound Source タブとメイン画面のSoundFont選択を同期
+  const prefSoundfontSelect = $("#pref-soundfont-select");
+  if (prefSoundfontSelect) {
+    prefSoundfontSelect.addEventListener("change", () => {
+      const mainSelect = $("#soundfont-select");
+      if (mainSelect) {
+        mainSelect.value = prefSoundfontSelect.value;
+        handleSoundfontChange();
+      }
+    });
+  }
+  const fsGain = $("#pref-fluidsynth-gain");
+  const fsGainVal = $("#pref-fluidsynth-gain-val");
+  if (fsGain && fsGainVal) {
+    fsGain.addEventListener("input", () => {
+      fsGainVal.textContent = Number(fsGain.value).toFixed(2);
+      state.fluidsynthGain = Number(fsGain.value);
+      savePreferenceFields({ fluidsynthGain: state.fluidsynthGain });
+    });
+  }
+  const chipGain = $("#pref-chip-stem-gain");
+  const chipGainVal = $("#pref-chip-stem-gain-val");
+  if (chipGain && chipGainVal) {
+    chipGain.addEventListener("input", () => {
+      chipGainVal.textContent = Number(chipGain.value).toFixed(2);
+      state.chipStemGain = Number(chipGain.value);
+      savePreferenceFields({ chipStemGain: state.chipStemGain });
+    });
+  }
+
+  // MIDI Output同期 (Sound Source & MIDI tab)
+  const ssMidiSelect = $("#sound-source-midi-output");
+  const midiTabSelect = $("#midi-tab-output-select");
+  if (ssMidiSelect) {
+    ssMidiSelect.addEventListener("change", () => {
+      if (midiTabSelect) midiTabSelect.value = ssMidiSelect.value;
+      state.midiOutputDevice = ssMidiSelect.value;
+      savePreferenceFields({ midiOutputDevice: state.midiOutputDevice });
+    });
+  }
+  if (midiTabSelect) {
+    midiTabSelect.addEventListener("change", () => {
+      if (ssMidiSelect) ssMidiSelect.value = midiTabSelect.value;
+      state.midiOutputDevice = midiTabSelect.value;
+      savePreferenceFields({ midiOutputDevice: state.midiOutputDevice });
+    });
+  }
+
+  // Audio Output
+  const audioSelect = $("#audio-output-select");
+  if (audioSelect) {
+    audioSelect.addEventListener("change", () => {
+      state.audioOutputDevice = audioSelect.value;
+      savePreferenceFields({ audioOutputDevice: state.audioOutputDevice });
+      allPlayers().forEach((p) => {
+        if (p && p.setSinkId) {
+          p.setSinkId(state.audioOutputDevice === "default" ? "" : state.audioOutputDevice).catch(() => {});
+        }
+      });
+    });
+  }
+
+  // Audio Driver
+  const audioDriverSelect = $("#audio-driver-select");
+  if (audioDriverSelect) {
+    audioDriverSelect.addEventListener("change", () => {
+      state.audioDriver = audioDriverSelect.value;
+      savePreferenceFields({ audioDriver: state.audioDriver });
+    });
+  }
+
+  // Audio Sample Rate
+  const audioSampleRateSelect = $("#audio-sample-rate");
+  if (audioSampleRateSelect) {
+    audioSampleRateSelect.addEventListener("change", () => {
+      state.audioSampleRate = Number(audioSampleRateSelect.value);
+      savePreferenceFields({ audioSampleRate: state.audioSampleRate });
+    });
+  }
+
+  // Audio Buffer Size
+  const audioBufferSizeSelect = $("#audio-buffer-size");
+  if (audioBufferSizeSelect) {
+    audioBufferSizeSelect.addEventListener("change", () => {
+      state.audioBufferSize = Number(audioBufferSizeSelect.value);
+      savePreferenceFields({ audioBufferSize: state.audioBufferSize });
+    });
+  }
+
+  // Hardware Chip Emulation controls
+  const dacSel = $("#pref-ym2612-dac");
+  if (dacSel) {
+    dacSel.addEventListener("change", () => {
+      state.ym2612Dac = dacSel.value;
+      savePreferenceFields({ ym2612Dac: state.ym2612Dac });
+    });
+  }
+  const ymClockSel = $("#pref-ym2151-clock");
+  if (ymClockSel) {
+    ymClockSel.addEventListener("change", () => {
+      state.ym2151Clock = ymClockSel.value;
+      savePreferenceFields({ ym2151Clock: state.ym2151Clock });
+    });
+  }
+  const snClockSel = $("#pref-sn76489-clock");
+  if (snClockSel) {
+    snClockSel.addEventListener("change", () => {
+      state.sn76489Clock = snClockSel.value;
+      savePreferenceFields({ sn76489Clock: state.sn76489Clock });
+    });
+  }
+
+  // Developer タブのキャッシュクリア
+  const devClearCache = $("#dev-clear-cache");
+  if (devClearCache) {
+    devClearCache.addEventListener("click", () => {
+      resetPlayer();
+      showStatus("Render cache cleared.", "success");
+    });
+  }
 
   $("#app-theme").addEventListener("change", (event) => {
     state.appTheme = event.target.value;
@@ -4521,12 +4894,6 @@ function setupSettingsDialog() {
     savePreferenceFields({ appTheme: state.appTheme });
   });
 
-  // 言語切り替えはテーマと違い即時DOM差し替えをしない — 静的テキストは
-  // web.pyのindex()がサーバー側でHTML文字列の時点で確定させる方式
-  // （i18n.localize_html()参照）なので、JS側だけで書き換えても静的部分が
-  // 追従しない。保存を待ってページを再読み込みし、サーバーから新しい言語の
-  // HTMLを取得し直す。init()はGET /api/sessionでWebSession側の状態を
-  // 復元するため、reloadしても編集中の内容は失われない。
   $("#app-language").addEventListener("change", async (event) => {
     state.appLanguage = event.target.value;
     await savePreferenceFields({ appLanguage: state.appLanguage });
@@ -4563,8 +4930,6 @@ function setupSettingsDialog() {
     savePreferenceFields({ renderWorkers: state.renderWorkers });
   });
 
-  // 色ピッカーはinputイベント（ドラッグ中）でプレビューだけを更新し、
-  // changeイベント（確定時）でPATCHを送る。ドラッグ中に毎回保存しないため。
   setupPianorollColorField({
     colorInputId: "#pianoroll-background-color",
     resetButtonId: "#pianoroll-background-reset",
@@ -4577,6 +4942,7 @@ function setupSettingsDialog() {
     stateKey: "pianorollGridColor",
     preferenceField: "pianorollGridColor",
   });
+  loadSystemDevices();
 }
 
 function setupPianorollColorField({ colorInputId, resetButtonId, stateKey, preferenceField }) {
@@ -4611,6 +4977,48 @@ function setupDropZone() {
     dropZone.classList.remove("dragging");
     if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
       handleUpload(event.dataTransfer.files);
+    }
+  });
+
+  // 全画面・メイン画面のどこへでもVGM/NSF/SPC/MIDIファイルをドラッグ＆ドロップしてインポート可能にする
+  let dragCounter = 0;
+  window.addEventListener("dragenter", (event) => {
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      dragCounter++;
+      document.body.classList.add("file-drag-active");
+    }
+  });
+  window.addEventListener("dragover", (event) => {
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }
+  });
+  window.addEventListener("dragleave", (event) => {
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        document.body.classList.remove("file-drag-active");
+      }
+    }
+  });
+  window.addEventListener("drop", (event) => {
+    if (event.dataTransfer?.types?.includes("Files")) {
+      event.preventDefault();
+      dragCounter = 0;
+      document.body.classList.remove("file-drag-active");
+      if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+        const files = Array.from(event.dataTransfer.files);
+        if (files.length === 1 && isMidiFilename(files[0].name)) {
+          uploadMidi(files[0]);
+        } else {
+          openImportDialog();
+          handleUpload(files);
+        }
+      }
     }
   });
 }

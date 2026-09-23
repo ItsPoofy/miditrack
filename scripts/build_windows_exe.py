@@ -145,6 +145,12 @@ def main():
         shutil.copytree(web_assets_src, web_assets_dest)
 
     downloads_dir = Path.home() / "Downloads" / "VGMidi"
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "VGMidi.exe"], capture_output=True)
+        import time
+        time.sleep(0.5)
+    except Exception:
+        pass
     if downloads_dir.exists():
         shutil.rmtree(downloads_dir)
     print(f"Deploying to {downloads_dir}...")

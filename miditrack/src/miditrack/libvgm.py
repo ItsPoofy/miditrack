@@ -40,6 +40,7 @@ class LibvgmMetadata:
     # vgm2midiが変換中に検出した注意事項（例: OPN Ch3 Specialのユニゾン検出）。
     # ユーザー向けの警告表示にのみ使う、変換結果には影響しない付随情報。
     warnings: list[str] = field(default_factory=list)
+    start_sample_offset: int = 0
 
     def group_indices(self, group_id: str) -> set[int]:
         """同じ物理チャンネルを共有するMIDIトラック番号を返す。"""
@@ -98,7 +99,13 @@ def load_metadata(path: Path, track_count: int) -> LibvgmMetadata | None:
         if isinstance(raw_warnings, list)
         else []
     )
-    return LibvgmMetadata(sample_count=sample_count, targets=targets, warnings=warnings)
+    start_sample_offset = _read_uint(payload.get("startSampleOffset", 0), "startSampleOffset")
+    return LibvgmMetadata(
+        sample_count=sample_count,
+        targets=targets,
+        warnings=warnings,
+        start_sample_offset=start_sample_offset,
+    )
 
 
 def validate_sources(
@@ -144,6 +151,7 @@ def render_selection(
     output_path: Path,
     sample_count: int,
     targets: Iterable[LibvgmTarget],
+    start_sample_offset: int = 0,
 ) -> None:
     """選択された複数のlibvgm物理チャンネルを1本のWAVへ描画する。"""
     combined: dict[tuple[int, int], tuple[int, int]] = {}
@@ -157,12 +165,18 @@ def render_selection(
         f"{device_type}:{instance}:{main_mask}:{linked_mask}"
         for (device_type, instance), (main_mask, linked_mask) in sorted(combined.items())
     ]
+    render_frames = sample_count + start_sample_offset
+    temp_wav = (
+        output_path.with_name(f"{output_path.stem}.raw.wav")
+        if start_sample_offset > 0
+        else output_path
+    )
     command = [
         str(resolve_helper()),
         "--selection",
         str(source_path),
-        str(output_path),
-        str(sample_count),
+        str(temp_wav),
+        str(render_frames),
         *selectors,
     ]
     try:
@@ -175,9 +189,37 @@ def render_selection(
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
+        if temp_wav != output_path:
+            temp_wav.unlink(missing_ok=True)
         raise RenderError(f"libvgmの描画を開始できません: {error}") from error
     if result.returncode != 0:
+        if temp_wav != output_path:
+            temp_wav.unlink(missing_ok=True)
         detail = result.stderr.strip() or result.stdout.strip()
         raise RenderError(f"libvgmの描画に失敗しました: {detail}")
-    if not has_wave_audio(output_path):
+    if not has_wave_audio(temp_wav):
+        if temp_wav != output_path:
+            temp_wav.unlink(missing_ok=True)
         raise RenderError("libvgmが有効なWAVを生成しませんでした")
+
+    if start_sample_offset > 0:
+        try:
+            import wave
+            with wave.open(str(temp_wav), "rb") as src:
+                params = src.getparams()
+                total_frames = src.getnframes()
+                if start_sample_offset < total_frames:
+                    src.setpos(start_sample_offset)
+                    frames_to_read = min(sample_count, total_frames - start_sample_offset)
+                    trimmed_pcm = src.readframes(frames_to_read)
+                else:
+                    trimmed_pcm = b""
+            with wave.open(str(output_path), "wb") as dst:
+                dst.setparams(params)
+                dst.writeframes(trimmed_pcm)
+        except Exception as error:
+            raise RenderError(f"実機ステムのオフセット調整に失敗しました: {error}") from error
+        finally:
+            temp_wav.unlink(missing_ok=True)
+        if not has_wave_audio(output_path):
+            raise RenderError("libvgmが有効なWAVを生成しませんでした")

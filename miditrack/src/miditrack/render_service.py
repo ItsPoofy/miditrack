@@ -107,7 +107,10 @@ class RenderService:
             if old_entry is not None:
                 self._session.render_cache_bytes -= old_entry.size_bytes
                 if old_entry.path != path:
-                    old_entry.path.unlink(missing_ok=True)
+                    try:
+                        old_entry.path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             entry = CachedAudio(path, path.stat().st_size)
             self._session.render_cache[cache_key] = entry
             self._session.render_cache_bytes += entry.size_bytes
@@ -139,7 +142,10 @@ class RenderService:
             if old_entry is not None:
                 self._session.preview_cache_bytes -= old_entry.size_bytes
                 if old_entry.path != path:
-                    old_entry.path.unlink(missing_ok=True)
+                    try:
+                        old_entry.path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
             entry = PreviewAudio(path, path.stat().st_size, window)
             self._session.preview_cache[cache_key] = entry
             self._session.preview_cache_bytes += entry.size_bytes
@@ -153,7 +159,10 @@ class RenderService:
                         continue
                     self._session.preview_cache.pop(old_key)
                     self._session.preview_cache_bytes -= candidate.size_bytes
-                    candidate.path.unlink(missing_ok=True)
+                    try:
+                        candidate.path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
                     break
                 else:
                     break
@@ -304,7 +313,10 @@ class RenderService:
                     continue
                 self._session.render_cache.pop(cache_key)
                 self._session.render_cache_bytes -= entry.size_bytes
-                entry.path.unlink(missing_ok=True)
+                try:
+                    entry.path.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 break
             else:
                 return

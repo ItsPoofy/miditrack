@@ -111,6 +111,18 @@ def _empty_preferences() -> dict[str, Any]:
         "hideEmptyTracks": True,
         "renderWorkers": "auto",
         "ensemblePresets": build_default_ensemble_presets(),
+        "soundSourceType": "soundfont",
+        "audioDriver": "wasapi",
+        "audioOutputDevice": "default",
+        "audioSampleRate": 48000,
+        "audioBufferSize": 480,
+        "midiOutputDevice": "none",
+        "enabledMidiInputs": [],
+        "fluidsynthGain": 0.35,
+        "chipStemGain": 1.0,
+        "ym2612Dac": "hq",
+        "ym2151Clock": "4000000",
+        "sn76489Clock": "0x0009",
     }
 
 
@@ -398,6 +410,18 @@ _FIELD_VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "hideEmptyTracks": lambda value: _validate_bool(value, "hideEmptyTracks"),
     "renderWorkers": _validate_render_workers,
     "ensemblePresets": validate_ensemble_presets,
+    "soundSourceType": lambda value: str(value) if value in {"soundfont", "midi"} else "soundfont",
+    "audioDriver": lambda value: str(value)[:32] if isinstance(value, str) else "wasapi",
+    "audioOutputDevice": lambda value: str(value)[:128] if isinstance(value, str) else "default",
+    "audioSampleRate": lambda value: int(value) if isinstance(value, (int, str)) and int(value) in {44100, 48000, 96000, 192000} else 48000,
+    "audioBufferSize": lambda value: int(value) if isinstance(value, (int, str)) and int(value) in {128, 256, 480, 512, 1024, 2048} else 480,
+    "midiOutputDevice": lambda value: str(value)[:128] if isinstance(value, str) else "none",
+    "enabledMidiInputs": lambda value: [str(item)[:128] for item in value if isinstance(item, (str, int))] if isinstance(value, list) else [],
+    "fluidsynthGain": lambda value: max(0.1, min(2.0, float(value))) if isinstance(value, (int, float, str)) else 0.35,
+    "chipStemGain": lambda value: max(0.1, min(2.0, float(value))) if isinstance(value, (int, float, str)) else 1.0,
+    "ym2612Dac": lambda value: str(value) if value in {"hq", "ladder"} else "hq",
+    "ym2151Clock": lambda value: str(value) if str(value) in {"3579545", "4000000"} else "4000000",
+    "sn76489Clock": lambda value: str(value) if str(value) in {"0x0009", "0x0006"} else "0x0009",
 }
 
 # PATCH /api/preferences で更新を許可するフィールド名の集合。selectedSoundfont

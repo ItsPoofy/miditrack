@@ -441,6 +441,12 @@ def create_app(
     def get_soundfonts() -> Response:
         return jsonify(**soundfont_payload(web_session, soundfont))
 
+    @app.get("/api/devices")
+    def get_devices() -> Response:
+        from .devices import list_system_devices
+
+        return jsonify(**list_system_devices())
+
     @app.post("/api/soundfont")
     def set_soundfont() -> Response:
         body = request.get_json(silent=True) or {}
@@ -752,12 +758,30 @@ def create_app(
             libvgm_targets = [
                 web_session.chip_metadata.targets[index] for index in indices
             ]
-            render_libvgm(
-                web_session.source_path,
-                output_path,
-                web_session.chip_metadata.sample_count,
-                libvgm_targets,
-            )
+            offset = getattr(web_session.chip_metadata, "start_sample_offset", 0)
+            if offset > 0:
+                try:
+                    render_libvgm(
+                        web_session.source_path,
+                        output_path,
+                        web_session.chip_metadata.sample_count,
+                        libvgm_targets,
+                        offset,
+                    )
+                except TypeError:
+                    render_libvgm(
+                        web_session.source_path,
+                        output_path,
+                        web_session.chip_metadata.sample_count,
+                        libvgm_targets,
+                    )
+            else:
+                render_libvgm(
+                    web_session.source_path,
+                    output_path,
+                    web_session.chip_metadata.sample_count,
+                    libvgm_targets,
+                )
         else:  # nsf
             assert isinstance(web_session.chip_metadata, nsf_chip.NsfChipMetadata)
             if web_session.source_song_index is None:
@@ -783,6 +807,7 @@ def create_app(
             "format": web_session.source_format,
             "songIndex": web_session.source_song_index,
             "sampleCount": web_session.chip_metadata.sample_count,
+            "startSampleOffset": getattr(web_session.chip_metadata, "start_sample_offset", 0),
             "indices": sorted(indices),
         }
         encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)

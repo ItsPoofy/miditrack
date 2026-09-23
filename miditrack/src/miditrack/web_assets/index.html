@@ -220,16 +220,6 @@
             <output class="player-volume-value" id="player-volume-value" for="player-volume">100%</output>
           </div>
         </div>
-
-        <div class="pianoroll-zoom" role="group" aria-label="ピアノロールの時間軸倍率" data-i18n-attr="aria-label">
-          <button type="button" id="pianoroll-zoom-out" aria-label="時間軸を縮小" disabled data-i18n-attr="aria-label">−</button>
-          <span id="pianoroll-zoom-value" aria-label="現在の時間軸倍率" data-i18n-attr="aria-label">1×</span>
-          <button type="button" id="pianoroll-zoom-in" aria-label="時間軸を拡大" disabled data-i18n-attr="aria-label">＋</button>
-        </div>
-
-        <button type="button" class="button small ghost ghost-notes-toggle" id="ghost-notes-toggle" aria-pressed="true" title="Ghost Notes">
-          Ghost Notes
-        </button>
       </div>
       <div class="pianoroll-card">
         <canvas
@@ -315,124 +305,336 @@
   <dialog class="app-dialog upload-dialog" id="open-dialog" closedby="any" aria-labelledby="upload-card-title" tabindex="-1"></dialog>
 
   <dialog class="app-dialog settings-dialog" id="settings-dialog" aria-labelledby="settings-dialog-title" tabindex="-1">
-    <div class="dialog-heading">
-      <h2 id="settings-dialog-title" data-i18n>環境設定</h2>
-      <p data-i18n>変更は即座に反映され、次回起動時も引き継がれます。</p>
-    </div>
-    <div class="settings-groups">
-      <div class="settings-group">
-        <h3 class="settings-group-title" data-i18n>表示設定</h3>
-        <section class="settings-section">
-          <div class="field-group">
-            <label class="field-label" for="app-theme" data-i18n>外観モード</label>
-            <select id="app-theme" class="program-select">
-              <option value="system" data-i18n>システム追従</option>
-              <option value="light" data-i18n>ライト</option>
-              <option value="dark" data-i18n>ダーク</option>
-            </select>
+    <h2 id="settings-dialog-title" class="visually-hidden" data-i18n>環境設定</h2>
+    <button type="button" class="settings-close-btn" id="settings-close" aria-label="閉じる" data-i18n-attr="aria-label" title="Close">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <path d="M18 6L6 18M6 6l12 12" />
+      </svg>
+    </button>
+
+    <div class="settings-modal-body">
+      <nav class="settings-sidebar" aria-label="Settings navigation">
+        <button type="button" class="settings-tab-btn is-active" data-tab="interface">
+          <span>Interface</span>
+        </button>
+        <button type="button" class="settings-tab-btn" data-tab="sound-source">
+          <span>Sound Source</span>
+        </button>
+        <button type="button" class="settings-tab-btn" data-tab="audio">
+          <span>Audio</span>
+        </button>
+        <button type="button" class="settings-tab-btn" data-tab="midi">
+          <span>MIDI</span>
+        </button>
+        <button type="button" class="settings-tab-btn" data-tab="developer">
+          <span>Developer</span>
+        </button>
+      </nav>
+
+      <div class="settings-content-wrapper">
+        <!-- Interface Tab -->
+        <div class="settings-tab-pane is-active" id="settings-pane-interface">
+          <div class="settings-pane-header">
+            <h3>Interface</h3>
+            <p class="settings-pane-sub" data-i18n>変更は即座に反映され、次回起動時も引き継がれます。</p>
           </div>
-        </section>
-        <section class="settings-section">
-          <div class="field-group">
-            <label class="field-label" for="app-language" data-i18n>表示言語</label>
-            <select id="app-language" class="program-select">
-              <option value="system" data-i18n>システム追従</option>
-              <option value="ja">日本語</option>
-              <option value="en">English</option>
-            </select>
+          <div class="settings-groups">
+            <div class="settings-group">
+              <h3 class="settings-group-title" data-i18n>表示設定</h3>
+              <section class="settings-section">
+                <div class="field-group">
+                  <label class="field-label" for="app-theme" data-i18n>外観モード</label>
+                  <select id="app-theme" class="program-select">
+                    <option value="system" data-i18n>システム追従</option>
+                    <option value="light" data-i18n>ライト</option>
+                    <option value="dark" data-i18n>ダーク</option>
+                  </select>
+                </div>
+              </section>
+              <section class="settings-section">
+                <div class="field-group">
+                  <label class="field-label" for="app-language" data-i18n>表示言語</label>
+                  <select id="app-language" class="program-select">
+                    <option value="system" data-i18n>システム追従</option>
+                    <option value="ja">日本語</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+              </section>
+              <section class="settings-section">
+                <h4 class="output-section-title" data-i18n>ピアノロール</h4>
+                <div class="settings-checkbox-row">
+                  <div class="convert-field is-checkbox">
+                    <input type="checkbox" id="pianoroll-rounded-notes" checked>
+                    <label for="pianoroll-rounded-notes" data-i18n>ノートを角丸にする</label>
+                  </div>
+                  <div class="convert-field is-checkbox">
+                    <input type="checkbox" id="pianoroll-outlined-notes" checked>
+                    <label for="pianoroll-outlined-notes" data-i18n>ノートに縁取りを付ける</label>
+                  </div>
+                  <div class="convert-field is-checkbox">
+                    <input type="checkbox" id="pianoroll-show-grid" checked>
+                    <label for="pianoroll-show-grid" data-i18n>グリッド線を表示</label>
+                  </div>
+                  <div class="convert-field is-checkbox">
+                    <input type="checkbox" id="pianoroll-show-keyboard" checked>
+                    <label for="pianoroll-show-keyboard" data-i18n>鍵盤を表示</label>
+                  </div>
+                </div>
+                <div class="settings-field-row settings-field-row-3">
+                  <div class="field-group">
+                    <label class="field-label" for="pianoroll-height" data-i18n>高さ</label>
+                    <select id="pianoroll-height" class="program-select">
+                      <option value="compact" data-i18n>小</option>
+                      <option value="standard" selected data-i18n>標準</option>
+                      <option value="tall" data-i18n>大</option>
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="track-color-palette" data-i18n>トラック配色</label>
+                    <select id="track-color-palette" class="program-select">
+                      <option value="rainbow" data-i18n>虹色</option>
+                      <option value="vivid" data-i18n>彩度強め</option>
+                      <option value="muted" data-i18n>彩度控えめ</option>
+                      <option value="accessible" data-i18n>色覚配慮</option>
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="pianoroll-grid-divisions" data-i18n>縦グリッド分割数</label>
+                    <select id="pianoroll-grid-divisions" class="program-select">
+                      <option value="4">4</option>
+                      <option value="8" selected>8</option>
+                      <option value="16">16</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="field-help" data-i18n>高さは全画面時は常にウィンドウ幅に追随し、この設定は反映されません。</p>
+                <div class="settings-field-row settings-color-fields">
+                  <div class="field-group settings-color-field">
+                    <label class="field-label" for="pianoroll-background-color" data-i18n>背景色</label>
+                    <div class="settings-color-row">
+                      <input type="color" id="pianoroll-background-color">
+                      <button type="button" class="button ghost small" id="pianoroll-background-reset" data-i18n>テーマ既定に戻す</button>
+                    </div>
+                  </div>
+                  <div class="field-group settings-color-field">
+                    <label class="field-label" for="pianoroll-grid-color" data-i18n>グリッド線の色</label>
+                    <div class="settings-color-row">
+                      <input type="color" id="pianoroll-grid-color">
+                      <button type="button" class="button ghost small" id="pianoroll-grid-reset" data-i18n>テーマ既定に戻す</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="settings-section">
+                <h4 class="output-section-title" data-i18n>トラック一覧</h4>
+                <div class="convert-field is-checkbox">
+                  <input type="checkbox" id="hide-empty-tracks" checked>
+                  <label for="hide-empty-tracks" data-i18n>ノート数が0のトラックを非表示にする</label>
+                </div>
+              </section>
+            </div>
+            <div class="settings-group">
+              <h3 class="settings-group-title" data-i18n>動作設定</h3>
+              <section class="settings-section">
+                <div class="field-group">
+                  <label class="field-label" for="render-workers" data-i18n>レンダリング同時処理数</label>
+                  <select id="render-workers" class="program-select">
+                    <option value="auto" selected data-i18n>自動</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                    <option value="8">8</option>
+                  </select>
+                </div>
+              </section>
+            </div>
           </div>
-        </section>
-        <section class="settings-section">
-          <h4 class="output-section-title" data-i18n>ピアノロール</h4>
-          <div class="settings-checkbox-row">
-            <div class="convert-field is-checkbox">
-              <input type="checkbox" id="pianoroll-rounded-notes" checked>
-              <label for="pianoroll-rounded-notes" data-i18n>ノートを角丸にする</label>
-            </div>
-            <div class="convert-field is-checkbox">
-              <input type="checkbox" id="pianoroll-outlined-notes" checked>
-              <label for="pianoroll-outlined-notes" data-i18n>ノートに縁取りを付ける</label>
-            </div>
-            <div class="convert-field is-checkbox">
-              <input type="checkbox" id="pianoroll-show-grid" checked>
-              <label for="pianoroll-show-grid" data-i18n>グリッド線を表示</label>
-            </div>
-            <div class="convert-field is-checkbox">
-              <input type="checkbox" id="pianoroll-show-keyboard" checked>
-              <label for="pianoroll-show-keyboard" data-i18n>鍵盤を表示</label>
+        </div>
+
+        <!-- Sound Source Tab -->
+        <div class="settings-tab-pane" id="settings-pane-sound-source" hidden>
+          <div class="settings-pane-header">
+            <h3>Sound Source</h3>
+          </div>
+          <div class="settings-panel-box">
+            <h4 class="settings-section-subtitle">Playback Output Engine</h4>
+            <div class="settings-segmented-group" role="radiogroup">
+              <label class="settings-segmented-btn is-active-segment" id="seg-label-soundfont">
+                <input type="radio" name="sound-source-type" id="sound-source-soundfont" value="soundfont" checked>
+                <span>SoundFont (FluidSynth)</span>
+              </label>
+              <label class="settings-segmented-btn" id="seg-label-midi">
+                <input type="radio" name="sound-source-type" id="sound-source-midi" value="midi">
+                <span>MIDI Output Device</span>
+              </label>
             </div>
           </div>
-          <div class="settings-field-row settings-field-row-3">
-            <div class="field-group">
-              <label class="field-label" for="pianoroll-height" data-i18n>高さ</label>
-              <select id="pianoroll-height" class="program-select">
-                <option value="compact" data-i18n>小</option>
-                <option value="standard" selected data-i18n>標準</option>
-                <option value="tall" data-i18n>大</option>
-              </select>
+
+          <!-- SoundFont Configuration -->
+          <div class="settings-panel-box" id="sound-source-sf-section">
+            <h4 class="settings-section-subtitle">SoundFont Configuration</h4>
+            <div class="settings-item-row">
+              <span class="settings-item-label">SoundFont (.sf2 / .sf3)</span>
+              <select id="pref-soundfont-select" class="settings-select-field"></select>
             </div>
-            <div class="field-group">
-              <label class="field-label" for="track-color-palette" data-i18n>トラック配色</label>
-              <select id="track-color-palette" class="program-select">
-                <option value="rainbow" data-i18n>虹色</option>
-                <option value="vivid" data-i18n>彩度強め</option>
-                <option value="muted" data-i18n>彩度控えめ</option>
-                <option value="accessible" data-i18n>色覚配慮</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="pianoroll-grid-divisions" data-i18n>縦グリッド分割数</label>
-              <select id="pianoroll-grid-divisions" class="program-select">
-                <option value="4">4</option>
-                <option value="8" selected>8</option>
-                <option value="16">16</option>
-              </select>
-            </div>
-          </div>
-          <p class="field-help" data-i18n>高さは全画面時は常にウィンドウ幅に追随し、この設定は反映されません。</p>
-          <div class="settings-field-row settings-color-fields">
-            <div class="field-group settings-color-field">
-              <label class="field-label" for="pianoroll-background-color" data-i18n>背景色</label>
-              <div class="settings-color-row">
-                <input type="color" id="pianoroll-background-color">
-                <button type="button" class="button ghost small" id="pianoroll-background-reset" data-i18n>テーマ既定に戻す</button>
+            <div class="settings-item-row">
+              <span class="settings-item-label">FluidSynth Gain</span>
+              <div class="settings-stepper-control">
+                <input type="range" id="pref-fluidsynth-gain" min="0.10" max="1.50" step="0.05" value="0.35">
+                <span class="settings-num-display" id="pref-fluidsynth-gain-val">0.35</span>
               </div>
             </div>
-            <div class="field-group settings-color-field">
-              <label class="field-label" for="pianoroll-grid-color" data-i18n>グリッド線の色</label>
-              <div class="settings-color-row">
-                <input type="color" id="pianoroll-grid-color">
-                <button type="button" class="button ghost small" id="pianoroll-grid-reset" data-i18n>テーマ既定に戻す</button>
-              </div>
+            <div class="settings-check-inline">
+              <label class="settings-checkbox-label">
+                <input type="checkbox" id="pref-dynamic-sample-loading" checked>
+                <span>Dynamic sample loading (reduces memory usage for large SoundFonts)</span>
+              </label>
             </div>
           </div>
-        </section>
-        <section class="settings-section">
-          <h4 class="output-section-title" data-i18n>トラック一覧</h4>
-          <div class="convert-field is-checkbox">
-            <input type="checkbox" id="hide-empty-tracks" checked>
-            <label for="hide-empty-tracks" data-i18n>ノート数が0のトラックを非表示にする</label>
+
+          <!-- MIDI Port Configuration -->
+          <div class="settings-panel-box" id="sound-source-midi-section" style="display: none;">
+            <h4 class="settings-section-subtitle">MIDI Output</h4>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Output</span>
+              <select id="sound-source-midi-output" class="settings-select-field"></select>
+            </div>
+            <h4 class="settings-section-subtitle" style="margin-top: 14px;">Enabled MIDI inputs</h4>
+            <div class="settings-midi-box" id="sound-source-midi-inputs"></div>
           </div>
-        </section>
-      </div>
-      <div class="settings-group">
-        <h3 class="settings-group-title" data-i18n>動作設定</h3>
-        <section class="settings-section">
-          <div class="field-group">
-            <label class="field-label" for="render-workers" data-i18n>レンダリング同時処理数</label>
-            <select id="render-workers" class="program-select">
-              <option value="auto" selected data-i18n>自動</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="4">4</option>
-              <option value="8">8</option>
-            </select>
+
+          <!-- Hardware Chip Emulation -->
+          <div class="settings-panel-box" style="margin-top: 14px;">
+            <h4 class="settings-section-subtitle">Hardware Chip Emulation (libvgm)</h4>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Chip Stem Gain</span>
+              <div class="settings-stepper-control">
+                <input type="range" id="pref-chip-stem-gain" min="0.10" max="2.00" step="0.05" value="1.00">
+                <span class="settings-num-display" id="pref-chip-stem-gain-val">1.00</span>
+              </div>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">OPN / YM2612 DAC Quality</span>
+              <select id="pref-ym2612-dac" class="settings-select-field">
+                <option value="hq" selected>High Quality (Linear Interpolated 48kHz)</option>
+                <option value="ladder">Authentic Ladder DAC Distortion (Genesis / Mega Drive)</option>
+              </select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">YM2151 Clock Rate</span>
+              <select id="pref-ym2151-clock" class="settings-select-field">
+                <option value="3579545">3.579545 MHz (Standard NTSC)</option>
+                <option value="4000000" selected>4.000000 MHz (Sharp X68000 / Arcade)</option>
+              </select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">SN76489 Noise Feedback</span>
+              <select id="pref-sn76489-clock" class="settings-select-field">
+                <option value="0x0009" selected>0x0009 (Sega Master System / Game Gear)</option>
+                <option value="0x0006">0x0006 (BBC Micro / ColecoVision)</option>
+              </select>
+            </div>
+            <div class="settings-check-inline">
+              <label class="settings-checkbox-label">
+                <input type="checkbox" id="pref-preserve-hardware-detune" checked>
+                <span>Preserve authentic chip detuning during conversion</span>
+              </label>
+            </div>
           </div>
-        </section>
+        </div>
+
+        <!-- Audio Tab -->
+        <div class="settings-tab-pane" id="settings-pane-audio" hidden>
+          <div class="settings-pane-header">
+            <h3>Audio</h3>
+          </div>
+          <div class="settings-panel-box">
+            <h4 class="settings-section-subtitle">Audio device</h4>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Driver</span>
+              <select id="audio-driver-select" class="settings-select-field">
+                <option value="wasapi" selected>Windows Audio</option>
+                <option value="directsound">DirectSound</option>
+                <option value="asio">ASIO</option>
+                <option value="webaudio">Web Audio</option>
+              </select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Output</span>
+              <select id="audio-output-select" class="settings-select-field"></select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Sample rate</span>
+              <select id="audio-sample-rate" class="settings-select-field">
+                <option value="44100">44100 Hz</option>
+                <option value="48000" selected>48000 Hz</option>
+                <option value="96000">96000 Hz</option>
+                <option value="192000">192000 Hz</option>
+              </select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Buffer size</span>
+              <select id="audio-buffer-size" class="settings-select-field">
+                <option value="128">128 samples</option>
+                <option value="256">256 samples</option>
+                <option value="480" selected>480 samples</option>
+                <option value="512">512 samples</option>
+                <option value="1024">1024 samples</option>
+                <option value="2048">2048 samples</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- MIDI Tab -->
+        <div class="settings-tab-pane" id="settings-pane-midi" hidden>
+          <div class="settings-pane-header">
+            <h3>MIDI</h3>
+          </div>
+          <div class="settings-panel-box">
+            <div class="settings-item-row">
+              <span class="settings-item-label">Output</span>
+              <select id="midi-tab-output-select" class="settings-select-field"></select>
+            </div>
+            <h4 class="settings-section-subtitle" style="margin-top: 14px;">Enabled MIDI inputs</h4>
+            <div class="settings-midi-box" id="midi-tab-inputs"></div>
+          </div>
+        </div>
+
+        <!-- Developer Tab -->
+        <div class="settings-tab-pane" id="settings-pane-developer" hidden>
+          <div class="settings-pane-header">
+            <h3>Developer</h3>
+          </div>
+          <div class="settings-panel-box">
+            <h4 class="settings-section-subtitle">Engine &amp; Diagnostics</h4>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Render Mode</span>
+              <select id="dev-render-mode" class="settings-select-field">
+                <option value="fast">Fast (Draft Preview)</option>
+                <option value="quality" selected>Quality (Full Fidelity)</option>
+              </select>
+            </div>
+            <div class="settings-item-row">
+              <span class="settings-item-label">Render Cache</span>
+              <button type="button" class="button ghost small" id="dev-clear-cache">Clear Render Cache</button>
+            </div>
+            <div class="settings-check-inline">
+              <label class="settings-checkbox-label">
+                <input type="checkbox" id="dev-debug-logging">
+                <span>Enable verbose engine and MIDI conversion logging</span>
+              </label>
+            </div>
+            <div class="settings-check-inline">
+              <label class="settings-checkbox-label">
+                <input type="checkbox" id="dev-hardware-accel" checked>
+                <span>Hardware audio mixing acceleration (DirectSound / WASAPI)</span>
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="dialog-actions">
-      <button type="button" class="button primary" id="settings-close" data-i18n>閉じる</button>
     </div>
   </dialog>
 

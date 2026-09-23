@@ -15,7 +15,7 @@ Converter = Callable[[SourceFormat, Path, Path, dict[str, Any]], tuple[Path | No
 StemTransformer = Callable[[Path, Path, float, int], None]
 Mixer = Callable[[list[tuple[Path, float]], Path], None]
 GainApplier = Callable[[Path, Path, float], None]
-LibvgmRenderer = Callable[[Path, Path, int, list[libvgm.LibvgmTarget]], None]
+LibvgmRenderer = Callable[..., None]
 NsfChipRenderer = Callable[[Path, Path, int, list[nsf_chip.NsfChipTarget], int], None]
 
 

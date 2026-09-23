@@ -105,6 +105,54 @@ class TestLibvgmRender(unittest.TestCase):
         self.assertEqual(argv[-1], "2:0:5:2")
         self.assertEqual(argv[1], "--selection")
 
+    def test_loads_start_sample_offset(self) -> None:
+        sidecar = Path(self.temp.name) / "offset.libvgm.json"
+        sidecar.write_text(json.dumps({
+            "version": 1,
+            "sampleCount": 44100,
+            "startSampleOffset": 1500,
+            "tracks": [
+                {"trackIndex": 0, "libvgm": {
+                    "deviceType": 2, "instance": 0, "mainMask": 64,
+                    "linkedMask": 0, "groupId": "2:0:64:0",
+                }},
+            ],
+        }), encoding="utf-8")
+        metadata = libvgm.load_metadata(sidecar, 1)
+        self.assertIsNotNone(metadata)
+        self.assertEqual(metadata.start_sample_offset, 1500)
+
+    def test_trims_start_sample_offset_accurately(self) -> None:
+        import wave
+        output = Path(self.temp.name) / "trimmed.wav"
+        targets = [libvgm.LibvgmTarget(2, 0, 1, 0, "a", False)]
+
+        def fake_run(argv, **_kwargs):
+            # argv: helper --selection input temp_wav frames ...
+            temp_path = Path(argv[3])
+            frames = int(argv[4])
+            # Write a valid 16-bit stereo 44.1kHz WAV with known sample numbers
+            with wave.open(str(temp_path), "wb") as w:
+                w.setnchannels(2)
+                w.setsampwidth(2)
+                w.setframerate(44100)
+                # each frame is 4 bytes
+                data = b"".join(int(i % 30000).to_bytes(2, "little", signed=True) * 2 for i in range(frames))
+                w.writeframes(data)
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        with mock.patch("miditrack.libvgm.subprocess.run", side_effect=fake_run) as mocked:
+            libvgm.render_selection(Path("song.vgm"), output, 100, targets, start_sample_offset=50)
+
+        argv = mocked.call_args.args[0]
+        self.assertEqual(int(argv[4]), 150)  # 100 + 50
+        with wave.open(str(output), "rb") as w:
+            self.assertEqual(w.getnframes(), 100)
+            # The first frame in output should have been frame 50 in input
+            frame0 = w.readframes(1)
+            expected_sample = int(50).to_bytes(2, "little", signed=True) * 2
+            self.assertEqual(frame0, expected_sample)
+
 
 if __name__ == "__main__":
     unittest.main()

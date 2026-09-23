@@ -872,7 +872,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .app-dialog {
   width: min(680px, calc(100% - 32px));
   max-height: min(760px, calc(100dvh - 32px));
-  overflow: auto;
+  overflow-x: hidden !important;
+  overflow-y: auto;
   padding: 0;
   color: var(--neutral-100);
   background: var(--neutral-0);
@@ -881,12 +882,22 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   box-shadow: 0 18px 50px rgba(23, 43, 77, 0.3);
 }
 
+.app-dialog::-webkit-scrollbar:horizontal,
+.upload-dialog::-webkit-scrollbar:horizontal {
+  display: none !important;
+  height: 0 !important;
+}
+
 .app-dialog::backdrop { background: rgba(23, 43, 77, 0.52); }
 .ensemble-preset-dialog form { padding: 24px; }
 .dialog-heading { margin-bottom: 20px; }
 .dialog-heading h2 { margin: 0 0 4px; font-size: 18px; }
 .dialog-heading p { margin: 0; color: var(--neutral-60); font-size: 13px; }
-.upload-dialog { padding: 0; }
+.upload-dialog {
+  padding: 0;
+  overflow-x: hidden !important;
+  overflow-y: auto;
+}
 /* 初期フォーカスはダイアログ本体へ置くが、コンテナ自体は操作対象ではないため
    WKWebViewの外周フォーカスリングは表示しない。内部の操作要素のfocus-visibleは
    共通ルールで引き続き表示される。 */
@@ -932,10 +943,308 @@ button:focus-visible, input:focus-visible, select:focus-visible {
    通常サイズのウィンドウであれば内部スクロールなしで全項目が収まるように
    している（極端に低いウィンドウ高では引き続きcalc(100dvh - 32px)で
    viewportに収め、その場合のみ.app-dialog由来のoverflow: autoが効く）。 */
-.settings-dialog {
-  width: min(760px, calc(100% - 32px));
-  max-height: min(860px, calc(100dvh - 32px));
-  padding: 24px;
+dialog.settings-dialog {
+  position: fixed !important;
+  inset: 0 !important;
+  margin: auto !important;
+  width: min(780px, calc(100vw - 32px)) !important;
+  height: min(560px, calc(100vh - 32px)) !important;
+  max-height: calc(100dvh - 32px) !important;
+  padding: 0;
+  border: 1px solid #363e4a;
+  border-radius: 12px;
+  background: #1b2026;
+  color: var(--neutral-100);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+dialog.settings-dialog:not([open]) {
+  display: none !important;
+}
+
+dialog.settings-dialog[open] {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+dialog.settings-dialog::backdrop {
+  background: rgba(10, 14, 20, 0.72) !important;
+  backdrop-filter: blur(2px);
+}
+
+.settings-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #3a424e;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: #586069;
+}
+
+.settings-segmented-group {
+  display: flex;
+  gap: 8px;
+  background: #14171c;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid #363e4a;
+  width: fit-content;
+}
+
+.settings-segmented-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8b949e;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.settings-segmented-btn input[type="radio"] {
+  display: none;
+}
+
+.settings-segmented-btn:hover {
+  color: #c9d1d9;
+}
+
+.settings-segmented-btn.is-active-segment {
+  background: #2b323c;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  font-weight: 600;
+}
+
+.settings-modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #1b2026;
+}
+
+.settings-sidebar {
+  width: 155px;
+  flex-shrink: 0;
+  background: #16191e;
+  border-right: 1px solid #2d343f;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-tab-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #8b949e;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.settings-tab-btn:hover {
+  color: #c9d1d9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-tab-btn.is-active {
+  color: #ffffff;
+  background: #2b323c;
+  border-color: #444f5e;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  font-weight: 600;
+}
+
+.settings-content-wrapper {
+  flex: 1;
+  min-width: 0;
+  padding: 20px 28px;
+  padding-right: 48px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #1b2026;
+  box-sizing: border-box;
+}
+
+.settings-empty-note {
+  font-size: 13px;
+  color: #8b949e;
+  font-style: italic;
+  padding: 6px 0;
+}
+
+.settings-tab-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tab-pane[hidden] {
+  display: none !important;
+}
+
+.settings-pane-header {
+  border-bottom: 1px solid #303742;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+}
+
+.settings-pane-header h3 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.settings-pane-sub {
+  font-size: 12px;
+  color: #8b949e;
+  margin: 4px 0 0;
+}
+
+.settings-panel-box {
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-section-subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8b949e;
+  margin: 0 0 4px;
+}
+
+.settings-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 32px;
+}
+
+.settings-item-label {
+  font-size: 13px;
+  color: #c9d1d9;
+  min-width: 140px;
+}
+
+.settings-select-field {
+  width: 240px;
+  height: 30px;
+  background: #14171c;
+  border: 1px solid #363e4a;
+  border-radius: 6px;
+  color: #e6edf3;
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.settings-select-field:focus {
+  outline: none;
+  border-color: #388bfd;
+}
+
+.settings-stepper-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 240px;
+}
+
+.settings-stepper-control input[type="range"] {
+  flex: 1;
+  accent-color: #388bfd;
+}
+
+.settings-num-display {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #8b949e;
+  min-width: 32px;
+  text-align: right;
+}
+
+.settings-check-inline {
+  margin-top: 4px;
+}
+
+.settings-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #c9d1d9;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+  accent-color: #388bfd;
+  margin: 0;
+}
+
+
+/* MIDI inputs box matching media_1790161512378.png */
+.settings-midi-box {
+  background: #14171c;
+  border: 1px solid #363e4a;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-midi-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #c9d1d9;
+  cursor: pointer;
+}
+
+.settings-midi-row input[type="checkbox"] {
+  accent-color: #388bfd;
+  margin: 0;
+}
+
+.settings-sub-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6e7681;
+  margin: 12px 0 0;
 }
 
 /* 「表示設定」「動作設定」を横並びの角丸矩形カードとしてグルーピングする。
@@ -1393,7 +1702,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 
-.pianoroll-zoom,
 .compact-stepper,
 .playback-controls {
   display: grid;
@@ -1409,10 +1717,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   flex-shrink: 0;
 }
 
-.pianoroll-zoom {
-  grid-template-columns: 26px 36px 26px;
-}
-
 .compact-stepper {
   grid-template-columns: 26px minmax(46px, auto) 26px;
 }
@@ -1421,8 +1725,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   grid-template-columns: repeat(4, 30px);
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) button,
-.pianoroll-zoom span,
+:is(.compact-stepper, .playback-controls) button,
 .transform-value {
   min-width: 0;
   height: 32px;
@@ -1440,41 +1743,35 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   box-sizing: border-box;
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) button {
+:is(.compact-stepper, .playback-controls) button {
   height: 32px;
   min-height: 32px;
   max-height: 32px;
   cursor: pointer;
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) button:hover:not(:disabled) {
+:is(.compact-stepper, .playback-controls) button:hover:not(:disabled) {
   color: var(--brand-dark);
   background: var(--brand-light);
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) button:focus-visible {
+:is(.compact-stepper, .playback-controls) button:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--brand-dark);
   outline-offset: -2px;
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) button:disabled {
+:is(.compact-stepper, .playback-controls) button:disabled {
   color: var(--neutral-50);
   cursor: default;
 }
 
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) > * + * {
+:is(.compact-stepper, .playback-controls) > * + * {
   border-left: 1px solid var(--neutral-40);
 }
 
-/* 上のbutton/.pianoroll-zoom span/.transform-valueへのborder:0リセットは
-   type選択子を伴い詳細度が上のルールより高く、隣接兄弟がbuttonまたは
-   .pianoroll-zoom spanの場合に区切り線を打ち消してしまう。同じ詳細度で
-   宣言順を後にして上書きし、button同士が並ぶplayback-controls等でも
-   区切り線を残す。 */
-:is(.pianoroll-zoom, .compact-stepper, .playback-controls) > * + button,
-.pianoroll-zoom > * + span {
+:is(.compact-stepper, .playback-controls) > * + button {
   border-left: 1px solid var(--neutral-40);
 }
 
@@ -1639,9 +1936,12 @@ body.is-fullscreen #open-dialog-close { display: inline-flex; }
 
 /* 全画面では通常表示のアップロードカードをダイアログへ移動する。 */
 body.is-fullscreen #open-dialog > #upload-card {
-  width: min(680px, calc(100vw - 32px));
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
   max-height: none;
-  overflow: visible;
+  overflow-x: hidden !important;
+  overflow-y: visible;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -1651,6 +1951,7 @@ body.is-fullscreen #open-dialog > #upload-card {
 body.is-fullscreen .upload-dialog {
   max-height: calc(100dvh - 24px);
   overflow-y: auto;
+  overflow-x: hidden !important;
 }
 
 body.is-fullscreen #open-dialog > #upload-card > summary { cursor: default; }
@@ -1750,33 +2051,7 @@ body.is-fullscreen #open-dialog > #upload-card > summary .disclosure-chevron { d
   box-sizing: border-box;
 }
 
-/* Ghost Notes Toggle */
-.ghost-notes-toggle {
-  margin-left: auto;
-  height: 32px;
-  min-height: 32px;
-  max-height: 32px;
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 6px;
-  border: 1px solid var(--neutral-40);
-  background: var(--neutral-0);
-  color: var(--neutral-80);
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  box-sizing: border-box;
-}
-.ghost-notes-toggle[aria-pressed="true"] {
-  background: var(--brand-light);
-  border-color: var(--brand);
-  color: var(--brand-dark);
-}
+
 
 body.is-fullscreen .app-shell {
   position: relative;
@@ -2024,7 +2299,7 @@ body.is-fullscreen .audition-toolbar::-webkit-scrollbar {
 
 .audition-toolbar .transform-controls,
 body.is-fullscreen .audition-toolbar .transform-controls {
-  margin: 0 !important;
+  margin-left: auto !important;
   display: flex !important;
   flex-direction: row !important;
   flex-wrap: nowrap !important;
@@ -2034,6 +2309,16 @@ body.is-fullscreen .audition-toolbar .transform-controls {
   min-height: 32px;
   max-height: 32px;
   flex-shrink: 0;
+}
+
+body.file-drag-active::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(119, 153, 221, 0.15);
+  border: 3px dashed var(--brand-dark);
+  pointer-events: none;
+  z-index: 999999;
 }
 
 body.is-fullscreen .pianoroll-card {

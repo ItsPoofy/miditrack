@@ -84,7 +84,10 @@ class WebSession:
         """試聴・最終WAV・実機ステムのセッション内キャッシュを破棄する。"""
         self.clear_preview_cache()
         for entry in self.render_cache.values():
-            entry.path.unlink(missing_ok=True)
+            try:
+                entry.path.unlink(missing_ok=True)
+            except OSError:
+                pass
         self.render_cache.clear()
         self.render_cache_bytes = 0
         self.current_render_key = None
@@ -97,7 +100,10 @@ class WebSession:
         protected = set(self.audio_sources.values()) if preserve_active_sources else set()
         for entry in self.preview_cache.values():
             if entry.path not in protected:
-                entry.path.unlink(missing_ok=True)
+                try:
+                    entry.path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         self.preview_cache.clear()
         self.preview_cache_bytes = 0
 

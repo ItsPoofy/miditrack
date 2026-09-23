@@ -219,6 +219,15 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(response.headers.get("X-Frame-Options"), "DENY")
         self.assertEqual(response.headers.get("Referrer-Policy"), "no-referrer")
 
+    def test_get_devices_returns_device_lists(self) -> None:
+        response = self.client.get("/api/devices", headers=AUTH_HEADERS)
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIn("audio_outputs", data)
+        self.assertIn("midi_outputs", data)
+        self.assertIn("midi_inputs", data)
+
+
     def test_native_es_modules_are_preloaded_and_served(self) -> None:
         """ブートストラップとその静的依存モジュールを同一オリジンから配信する。"""
         html = self.client.get("/").get_data(as_text=True)
@@ -5023,6 +5032,18 @@ class TestTrackFilenameLabel(unittest.TestCase):
 
     def test_leading_and_trailing_space_and_dot_are_stripped(self) -> None:
         self.assertEqual(_track_filename_label(" Bass. ", 0), "Bass")
+
+
+class TestSessionCacheClearing(unittest.TestCase):
+    def test_clear_render_cache_ignores_oserror_when_file_locked(self) -> None:
+        from miditrack.web_session import WebSession, CachedAudio
+        session = WebSession()
+        dummy_path = mock.MagicMock(spec=Path)
+        dummy_path.unlink.side_effect = OSError(32, "The process cannot access the file because it is being used by another process")
+        session.render_cache["key"] = CachedAudio(dummy_path, 100)
+        session.clear_render_cache()
+        self.assertEqual(len(session.render_cache), 0)
+        self.assertEqual(session.render_cache_bytes, 0)
 
 
 if __name__ == "__main__":
