@@ -11,8 +11,11 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 LAUNCHER_PATH = PROJECT_DIR / "miditrack_app.swift"
+import shutil
+
 SWIFT_TOOLCHAIN_IS_AVAILABLE = (
-    subprocess.run(["xcode-select", "-p"], capture_output=True, check=False).returncode == 0
+    shutil.which("xcode-select") is not None
+    and subprocess.run(["xcode-select", "-p"], capture_output=True, check=False).returncode == 0
 )
 
 

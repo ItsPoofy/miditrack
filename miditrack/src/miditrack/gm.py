@@ -183,9 +183,20 @@ GM_PROGRAM_NAMES: tuple[str, ...] = (
 assert len(GM_PROGRAM_NAMES) == 128 == len(GM_FAMILY_NAMES) * PROGRAMS_PER_FAMILY
 
 # MIDIチャンネル10（0始まりで9）はGMのパーカッションチャンネル。
-# ドラムキット切り替え（Bank Select併用）は対象外——このチャンネルを使うトラックは
-# 一覧に表示するが、音色変更UIは出さない（miditrack/CLAUDE.md参照）。
 PERCUSSION_CHANNEL = 9
+
+# General MIDI標準のドラムキット定義（プログラム番号順）。
+GM_DRUM_KITS: tuple[tuple[int, str], ...] = (
+    (0, "Standard Kit"),
+    (8, "Room Kit"),
+    (16, "Power Kit"),
+    (24, "Electronic Kit"),
+    (25, "TR-808 Kit"),
+    (32, "Jazz Kit"),
+    (40, "Brush Kit"),
+    (48, "Orchestra Kit"),
+    (56, "SFX Kit"),
+)
 
 
 def program_name(program: int) -> str:

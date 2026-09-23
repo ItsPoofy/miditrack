@@ -14,9 +14,11 @@ nsf2midi/spc2midi/vgm2midi 自体はJSON出力を持たないため、-l/--list 
 
 from __future__ import annotations
 
+import gzip
 import os
 import re
 import shutil
+import struct
 import subprocess
 import zipfile
 from dataclasses import dataclass
@@ -377,12 +379,18 @@ def resolve_converter_argv0(fmt: SourceFormat) -> list[str]:
     repo_root = resolve_resource_root(__file__)
 
     if fmt.key == "nsf":
+        sibling_exe = repo_root / "nsf2midi" / "nsf2midi.exe"
+        if is_executable_file(sibling_exe):
+            return [str(sibling_exe)]
         sibling = repo_root / "nsf2midi" / "nsf2midi"
         if is_executable_file(sibling):
             return [str(sibling)]
         return ["nsf2midi"]
 
     if fmt.key == "spc":
+        sibling_exe = repo_root / "spc2midi" / "spc2midi.exe"
+        if is_executable_file(sibling_exe):
+            return [str(sibling_exe)]
         sibling = repo_root / "spc2midi" / "spc2midi"
         if is_executable_file(sibling):
             return [str(sibling)]
@@ -400,7 +408,8 @@ def resolve_converter_argv0(fmt: SourceFormat) -> list[str]:
 
 def _run(argv: list[str], *, tool_label: str) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(
+        from .tooling import safe_subprocess_run
+        return safe_subprocess_run(
             argv,
             shell=False,
             capture_output=True,
@@ -535,23 +544,128 @@ def list_songs(fmt: SourceFormat, source_path: Path) -> tuple[dict[str, Any], li
 # --- 変換オプションスキーマ --------------------------------------------------
 
 
-def option_schema(fmt: SourceFormat) -> list[dict[str, Any]]:
-    """フォーマット別の変換オプション定義（フロントエンドが動的に描画する）。
+def probe_tempo(fmt: SourceFormat, source_path: Path) -> int | None:
+    """フォーマットが対応していれば、音源ファイルからテンポ（BPM）を高速プローブして返す。"""
+    if fmt.key != "vgm":
+        return None
+    try:
+        argv0 = resolve_converter_argv0(fmt)
+        argv = [*argv0, "--probe", str(source_path)]
+        result = _run(argv, tool_label=f"{fmt.key}2midi")
+        if result.returncode == 0 and result.stdout.strip():
+            import json
+            data = json.loads(result.stdout.strip())
+            tempo = data.get("tempo")
+            if isinstance(tempo, (int, float)) and tempo > 0:
+                return round(tempo)
+    except Exception:
+        pass
+    return None
 
-    NSF/SPC/VGMいずれも「秒数」「ループ回数」を`layoutGroup: "timing"`付きで
-    同じ順序（loops→durationSeconds）で宣言する。実際に指定できるのはこの
-    うちフォーマットごとに片方（VGMは両方、相互排他）だけで、もう片方には
-    `unavailable: True`を立てて理由を`help`に書く——非表示にするのではなく、
-    disabledのまま理由付きで見せることで3フォーマットのUIを統一する。
 
-    テンポ(BPM)はVGMにも存在しない: 生のレジスタログには拍・テンポの概念が
-    無く、選んだBPM値は実際の再生時間やピッチには一切影響せず、MIDI内の
-    ティック配置の粒度（DAWで見た小節線の細かさ）を変えるだけ。ユーザーが
-    実際に変えたいのは再生速度であり、それは変換後の「全体の速度」機能
-    （本ファイルの「Why tempo is scaled, not replaced」参照）でMIDIの
-    tempoメタごと調整できるため、変換時テンポは`_build_argv()`側で常に
-    120固定にし、オプションとしては公開しない。
-    """
+def detect_vgm_console(path: Path) -> dict[str, str] | None:
+    """VGM/VGZヘッダおよびGD3タグからハードウェア・ゲーム機（コンソール）名を判定する。"""
+    try:
+        raw = path.read_bytes()
+        data = gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw
+        if len(data) < 64 or data[:4] != b"Vgm ":
+            return None
+        version = struct.unpack("<I", data[8:12])[0]
+        gd3_offset = struct.unpack("<I", data[0x14:0x18])[0]
+        sys_en = ""
+        sys_jp = ""
+        if gd3_offset != 0:
+            gd3_start = 0x14 + gd3_offset
+            if gd3_start + 12 <= len(data) and data[gd3_start : gd3_start + 4] == b"Gd3 ":
+                gd3_len = struct.unpack("<I", data[gd3_start + 8 : gd3_start + 12])[0]
+                gd3_data = data[gd3_start + 12 : gd3_start + 12 + gd3_len]
+                strings = []
+                cur = bytearray()
+                for i in range(0, len(gd3_data), 2):
+                    char = gd3_data[i : i + 2]
+                    if char == b"\x00\x00":
+                        strings.append(cur.decode("utf-16le", errors="replace").strip())
+                        cur = bytearray()
+                    else:
+                        cur.extend(char)
+                if len(strings) > 4:
+                    sys_en = strings[4]
+                if len(strings) > 5:
+                    sys_jp = strings[5]
+
+        clean_name = sys_jp or sys_en
+        if clean_name:
+            cn = clean_name.lower()
+            if "mega drive" in cn or "genesis" in cn or "メガドライブ" in cn:
+                return {"ja": "メガドライブ", "en": "Genesis / Mega Drive"}
+            if "pc-98" in cn or "pc98" in cn:
+                return {"ja": "PC-98", "en": "PC-98"}
+            if "pc-88" in cn or "pc88" in cn:
+                return {"ja": "PC-88", "en": "PC-88"}
+            if "pc engine" in cn or "pcエンジン" in cn or "turbografx" in cn:
+                return {"ja": "PCエンジン", "en": "PC Engine / TG-16"}
+            if "game boy" in cn or "gameboy" in cn or "ゲームボーイ" in cn:
+                return {"ja": "ゲームボーイ", "en": "Game Boy"}
+            if "master system" in cn or "マスターシステム" in cn:
+                return {"ja": "マスターシステム", "en": "Master System"}
+            if "game gear" in cn or "ゲームギア" in cn:
+                return {"ja": "ゲームギア", "en": "Game Gear"}
+            if "x68000" in cn:
+                return {"ja": "X68000", "en": "X68000"}
+            if "arcade" in cn or "アーケード" in cn:
+                return {"ja": "アーケード", "en": "Arcade"}
+            if "famicom" in cn or "nes" in cn or "ファミコン" in cn:
+                return {"ja": "ファミコン", "en": "NES / Famicom"}
+            return {"ja": clean_name, "en": sys_en or clean_name}
+
+        def read_clock(offset: int, min_ver: int) -> int:
+            return (
+                struct.unpack("<I", data[offset : offset + 4])[0]
+                if version >= min_ver and len(data) >= offset + 4
+                else 0
+            )
+
+        sn = struct.unpack("<I", data[0x0C:0x10])[0]
+        ym2413 = struct.unpack("<I", data[0x10:0x14])[0]
+        ym2612 = read_clock(0x2C, 0x110)
+        ym2151 = read_clock(0x30, 0x110)
+        sega_pcm = read_clock(0x38, 0x151)
+        ym2203 = read_clock(0x44, 0x151)
+        ym2608 = read_clock(0x48, 0x151)
+        ym2610 = read_clock(0x4C, 0x151)
+        gb = read_clock(0x80, 0x161)
+        nes = read_clock(0x84, 0x161)
+        huc = read_clock(0xA4, 0x161)
+        c140 = read_clock(0xA8, 0x161)
+        qsound = read_clock(0xB4, 0x161)
+
+        if ym2612 or sega_pcm:
+            return {"ja": "メガドライブ", "en": "Genesis / Mega Drive"}
+        if ym2608:
+            return {"ja": "PC-88 / PC-98", "en": "PC-88 / PC-98"}
+        if ym2203:
+            return {"ja": "PC-88 / アーケード", "en": "PC-88 / Arcade"}
+        if ym2610:
+            return {"ja": "ネオジオ / アーケード", "en": "Neo Geo / Arcade"}
+        if huc:
+            return {"ja": "PCエンジン", "en": "PC Engine / TG-16"}
+        if gb:
+            return {"ja": "ゲームボーイ", "en": "Game Boy"}
+        if nes:
+            return {"ja": "ファミコン", "en": "NES / Famicom"}
+        if ym2151:
+            return {"ja": "アーケード / X68000", "en": "Arcade / X68000"}
+        if qsound or c140:
+            return {"ja": "アーケード", "en": "Arcade"}
+        if sn or ym2413:
+            return {"ja": "マスターシステム / ゲームギア", "en": "Master System / Game Gear"}
+        return None
+    except Exception:
+        return None
+
+
+def option_schema(fmt: SourceFormat, detected_tempo: int | None = None) -> list[dict[str, Any]]:
+    """フォーマット別の変換オプション定義（フロントエンドが動的に描画する）。"""
     if fmt.key == "nsf":
         return [
             {"name": "songIndex", "type": "song", "label": t("曲"), "default": 0},
@@ -563,30 +677,23 @@ def option_schema(fmt: SourceFormat) -> list[dict[str, Any]]:
                 "layoutGroup": "timing",
                 "unavailable": True,
                 "placeholder": t("指定不可"),
-                "help": t("実機のループ点を検出できないため、長さは秒数で指定します"),
             },
             {
                 "name": "durationSeconds",
                 "type": "number",
-                "label": t("秒数"),
+                "label": t("曲の長さ（秒）"),
                 "default": None,
                 "min": 1,
                 "layoutGroup": "timing",
-                "placeholder": t("空欄で自動"),
-                "help": t("空欄ならNSFEのトラック長、それも無ければ180秒"),
+                "placeholder": t("自動"),
             },
             {
                 "name": "chipNoise",
                 "type": "bool",
-                "label": t("原曲の音源（実機）を初期選択"),
+                "label": t("原曲の音源を優先"),
                 "default": False,
-                "help": t(
-                    "音符のある全チャンネルの音源を原曲の音源（チップエミュレーション）に"
-                    "初期選択します。チェックを外していても、変換後にトラックごとSoundFont"
-                    "や原曲の音源へ自由に切り替えられます"
-                ),
             },
-            {"name": "forcePal", "type": "bool", "label": t("PALタイミングを使用"), "default": False},
+            {"name": "forcePal", "type": "bool", "label": t("PAL方式 (50Hz)"), "default": False},
         ]
     if fmt.key == "spc":
         return [
@@ -598,28 +705,21 @@ def option_schema(fmt: SourceFormat) -> list[dict[str, Any]]:
                 "default": 1,
                 "min": 0,
                 "layoutGroup": "timing",
-                "help": t("無限ループ区間を展開する回数"),
             },
             {
                 "name": "durationSeconds",
                 "type": "number",
-                "label": t("秒数"),
+                "label": t("曲の長さ（秒）"),
                 "default": None,
                 "layoutGroup": "timing",
                 "unavailable": True,
                 "placeholder": t("指定不可"),
-                "help": t("曲の長さはループ回数で指定します"),
             },
             {
                 "name": "gameSoundfont",
                 "type": "bool",
-                "label": t("原曲の音源（実機）を初期選択"),
+                "label": t("原曲のSoundFontを優先"),
                 "default": False,
-                "help": t(
-                    "SPCのBRRサンプルから生成したSoundFontを、音符のある全トラックの音源に"
-                    "初期選択します。チェックを外していても、変換後にトラックごとSoundFont"
-                    "や原曲の音源へ自由に切り替えられます"
-                ),
             },
         ]
     if fmt.key == "vgm":
@@ -633,40 +733,50 @@ def option_schema(fmt: SourceFormat) -> list[dict[str, Any]]:
                 "layoutGroup": "timing",
                 "conflicts": ["durationSeconds"],
                 "placeholder": t("自動"),
-                "help": t("秒数と同時指定不可"),
             },
             {
                 "name": "durationSeconds",
                 "type": "number",
-                "label": t("秒数"),
+                "label": t("曲の長さ（秒）"),
                 "default": None,
                 "min": 0.001,
                 "layoutGroup": "timing",
                 "conflicts": ["loops"],
                 "placeholder": t("自動"),
-                "help": t("ループ回数と同時指定不可"),
             },
             {
                 "name": "chipNoise",
                 "type": "bool",
-                "label": t("原曲の音源（実機）を初期選択"),
+                "label": t("原曲の音源を優先"),
                 "default": False,
-                "help": t(
-                    "安全に判定できたノイズ/DAC/リズム系トラックの音源を原曲の音源"
-                    "（libvgm）に初期選択します（曖昧な共有チャンネルはSoundFontのまま）。"
-                    "チェックを外していても、変換後にトラックごとSoundFontや原曲の音源へ"
-                    "自由に切り替えられます"
-                ),
             },
             {
                 "name": "ch3SpecialPercussion",
                 "type": "bool",
-                "label": t("OPN Ch3 SpecialをGMドラムに変換"),
+                "label": t("OPN Ch3ドラム変換"),
                 "default": False,
-                "help": t(
-                    "YM2203/YM2608/YM2612 Ch3 Specialの4オペレータを別々の音程トラックにせず、"
-                    "複合アタックをGMのキック、スネア、ハイハット、シンバル、タムへ近似します"
-                ),
+            },
+            {
+                "name": "preserveChipTuning",
+                "type": "bool",
+                "label": t("実機の微小デチューンを保持"),
+                "default": False,
+            },
+            {
+                "name": "autoTempo",
+                "type": "bool",
+                "label": t("テンポ自動検出"),
+                "default": True,
+            },
+            {
+                "name": "tempo",
+                "type": "number",
+                "label": t("手動テンポ (BPM)"),
+                "default": None,
+                "min": 20,
+                "max": 500,
+                "conflicts": ["autoTempo"],
+                "placeholder": str(detected_tempo) if detected_tempo is not None else "120",
             },
         ]
     raise AssertionError(f"unknown format: {fmt.key}")  # pragma: no cover
@@ -712,10 +822,12 @@ def validate_convert_options(fmt: SourceFormat, songs: list[dict[str, Any]], raw
 
     for name, field in schema.items():
         conflicts = field.get("conflicts")
-        if not conflicts or result.get(name) is None:
+        val = result.get(name)
+        if not conflicts or val is None or val is False:
             continue
         for other in conflicts:
-            if result.get(other) is not None:
+            other_val = result.get(other)
+            if other_val is not None and other_val is not False:
                 raise WebValidationError(t("{name}と{other}は同時に指定できません", name=name, other=other))
 
     return result
@@ -812,12 +924,13 @@ def _build_argv(
         return argv
 
     if fmt.key == "vgm":
-        # テンポ(BPM)は変換オプションとしてユーザーに公開しない
-        # （option_schema()のdocstring参照）: 選んだBPM値は実際の再生時間や
-        # ピッチには一切影響せず、MIDI内のティック配置の粒度を変えるだけ。
-        # ユーザーが実際に変えたい再生速度は変換後の「全体の速度」機能で
-        # MIDIのtempoメタごと調整できるため、変換時は常に120固定でよい。
-        argv = [*argv0, "-o", str(output_path), "-t", "120"]
+        argv = [*argv0, "-o", str(output_path)]
+        if options.get("tempo") is not None:
+            argv += ["-t", str(options["tempo"])]
+        elif options.get("autoTempo", True):
+            argv.append("--auto-tempo")
+        else:
+            argv += ["-t", "120"]
         argv += ["--track-metadata", str(libvgm_metadata_path_for(output_path))]
         if options.get("loops") is not None:
             argv += ["--loops", str(options["loops"])]
@@ -830,6 +943,8 @@ def _build_argv(
             argv.append("--keep-dac-midi")
         if options.get("ch3SpecialPercussion"):
             argv.append("--ch3-special-percussion")
+        if not options.get("preserveChipTuning", False):
+            argv.append("--no-chip-tuning")
         argv.append(str(source_path))
         return argv
 

@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
+
+
+def safe_subprocess_run(argv, **kwargs) -> subprocess.CompletedProcess:
+    """Run subprocess with CREATE_NO_WINDOW on Windows to prevent console flashing."""
+    if os.name == "nt" and "creationflags" not in kwargs:
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(argv, **kwargs)
 
 
 def resolve_resource_root(module_path: str) -> Path:
@@ -17,7 +25,11 @@ def resolve_resource_root(module_path: str) -> Path:
 def is_executable_file(path: str | Path) -> bool:
     """pathが実行可能な通常ファイルかを返す。"""
     candidate_path = Path(path)
-    return candidate_path.is_file() and os.access(candidate_path, os.X_OK)
+    if not candidate_path.is_file():
+        return False
+    if os.name == "nt":
+        return True
+    return os.access(candidate_path, os.X_OK)
 
 
 def has_wave_audio(path: Path) -> bool:

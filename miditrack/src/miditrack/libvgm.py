@@ -121,7 +121,15 @@ def validate_sources(
 def resolve_helper() -> Path:
     """環境変数またはリポジトリ同梱のlibvgm helperを解決する。"""
     configured = os.environ.get("VGM2MIDI_STEMS_HELPER")
-    helper = Path(configured) if configured else DEFAULT_HELPER
+    if configured:
+        helper = Path(configured)
+        if is_executable_file(helper):
+            return helper
+    if os.name == "nt":
+        candidate_exe = DEFAULT_HELPER.with_suffix(".exe")
+        if is_executable_file(candidate_exe):
+            return candidate_exe
+    helper = DEFAULT_HELPER
     if not is_executable_file(helper):
         raise RenderError(
             "libvgm helperが見つかりません。リポジトリ同梱の"
@@ -158,7 +166,8 @@ def render_selection(
         *selectors,
     ]
     try:
-        result = subprocess.run(
+        from .tooling import safe_subprocess_run
+        result = safe_subprocess_run(
             command,
             capture_output=True,
             text=True,

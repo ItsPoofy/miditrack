@@ -134,12 +134,8 @@ def analyze_track(track: Any, index: int) -> TrackInfo:
         reason = "no-notes"
     elif len(sorted_channels) == 1:
         channel = sorted_channels[0]
-        if channel == PERCUSSION_CHANNEL:
-            editable = False
-            reason = "percussion"
-        else:
-            editable = True
-            reason = None
+        editable = True
+        reason = None
         # このトラックの単一チャンネルに対する既存プログラムチェンジを検出する。
         # vgm2midi は全トラックにGM81を送信済み、nsf2midiのgm.mdfプリセットも
         # チャンネルごとに音色を送信済みなので、「生成直後は空」という前提を
@@ -467,32 +463,34 @@ def apply_assignments(
     source_volumes: dict[int, int] | None = None,
     speed: float = DEFAULT_SPEED_RATIO,
     transpose: int = DEFAULT_TRANSPOSE_SEMITONES,
+    channels: dict[int, int] | None = None,
+    names: dict[int, str] | None = None,
 ) -> dict[str, int | float]:
-    """原本を読み直し、音色・トラック別Note Onベロシティ倍率・全体の速度/移調を適用して保存する。
-
-    既存のプログラムチェンジがあれば値を書き換えるだけ（delta-time連鎖を壊さない
-    ＝タイミング完全維持）。無ければ、そのチャンネルの最初のメッセージの直前に
-    time=0 で挿入する（後続のtickは一切ずれない）。
-
-    音量は「絶対音量（100%=CC7=100相当）」として扱う。共有MIDIチャンネルへ新規に
-    CC7を送ることはせず、対象トラック内のNote On velocityだけを原本値から倍率変換
-    するため、同じチャンネルを使う別トラックの音量へ干渉しない。ただし、そのトラック
-    が変換元で単独チャンネルを占有しCC7（source_volumes、既定100未満＝減衰のみ採用、
-    詳細はanalyze_track()参照）を持っていた場合は、そのCC7を100へ正規化する
-    （既存メッセージの値を書き換えるだけで新規挿入はしない）。これにより、slider値を
-    そのままvelocity倍率として適用しても二重に減衰しない。fluidsynthのCC7カーブは
-    厳密には線形ではないため、この畳み込みは近似であることに留意
-    （miditrack/CLAUDE.md「Why per-track volume scales Note On velocity...」参照）。
-
-    speed/transposeが既定値（1.0・0）のときはテンポ・ノート番号を一切書き換えず、
-    常に原本を読み直すapply_assignments()自体の不変条件により、この関数を繰り返し
-    呼んでも速度・移調が累積することはない。
-    """
+    """原本を読み直し、音色・トラック別Note Onベロシティ倍率・全体の速度/移調を適用して保存する。"""
     mido = import_mido()
     try:
         midi_file = mido.MidiFile(original_path)
     except (OSError, EOFError, ValueError) as error:
         raise MidiTrackError(t("MIDIを読み込めません: {original_path}: {error}", original_path=original_path, error=error)) from error
+
+    for track_index, new_name in (names or {}).items():
+        if track_index < len(midi_file.tracks):
+            track = midi_file.tracks[track_index]
+            found = False
+            for msg in track:
+                if msg.is_meta and msg.type == "track_name":
+                    msg.name = str(new_name)
+                    found = True
+                    break
+            if not found:
+                track.insert(0, mido.MetaMessage("track_name", name=str(new_name), time=0))
+
+    for track_index, new_channel in (channels or {}).items():
+        if track_index < len(midi_file.tracks):
+            track = midi_file.tracks[track_index]
+            for msg in track:
+                if hasattr(msg, "channel"):
+                    msg.channel = new_channel
 
     updated = 0
     inserted = 0
@@ -511,7 +509,7 @@ def apply_assignments(
             continue
 
         channel = _single_note_channel(track)
-        if channel is None or channel == PERCUSSION_CHANNEL:
+        if channel is None:
             raise WebValidationError(t("トラック{track_index}は編集対象外です", track_index=track_index))
 
         existing = [m for m in track if m.type == "program_change" and m.channel == channel]

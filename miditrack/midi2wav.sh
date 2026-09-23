@@ -315,6 +315,7 @@ fi
 FLUIDSYNTH_OPTS=(-ni)
 [[ "$VERBOSE" == true ]] || FLUIDSYNTH_OPTS+=(-q)
 [[ "$DYNAMIC_SAMPLE_LOADING" == true ]] && FLUIDSYNTH_OPTS+=(-o synth.dynamic-sample-loading=1)
+FLUIDSYNTH_OPTS+=(-o synth.cpu-cores=4)
 [[ -n "$GAIN" ]] && FLUIDSYNTH_OPTS+=(-g "$GAIN")
 
 info_line "SoundFont: ${C_BOLD}$SOUNDFONT${C_RESET}"

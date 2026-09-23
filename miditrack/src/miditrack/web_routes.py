@@ -36,7 +36,7 @@ try:
 except ImportError as import_error:  # pragma: no cover - exercised via cli.py's own guard
     raise ImportError("miditrack requires Flask") from import_error
 
-from . import convert, i18n, libvgm, midi, mix, nsf_chip, pianoroll, preferences, project, render
+from . import convert, gm, i18n, libvgm, midi, mix, nsf_chip, pianoroll, preferences, project, render
 from .i18n import t
 from .convert import SourceFormat
 from .errors import (
@@ -73,11 +73,29 @@ from .web_session import (
 
 def resolve_asset_directory() -> Path:
     """アプリバンドルまたは開発パッケージのWebアセットを解決する。"""
+    candidates: list[Path] = []
     resource_root = os.environ.get("MIDITRACK_RESOURCE_ROOT")
     if resource_root:
-        bundled_assets = Path(resource_root) / "miditrack/src/miditrack/web_assets"
-        if bundled_assets.is_dir():
-            return bundled_assets
+        candidates.append(Path(resource_root) / "miditrack/src/miditrack/web_assets")
+        candidates.append(Path(resource_root) / "web_assets")
+
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "_internal" / "miditrack" / "web_assets")
+        candidates.append(exe_dir / "_internal" / "miditrack" / "src" / "miditrack" / "web_assets")
+        candidates.append(exe_dir / "_internal" / "web_assets")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "miditrack" / "web_assets")
+            candidates.append(Path(meipass) / "miditrack" / "src" / "miditrack" / "web_assets")
+
+    candidates.append(Path(__file__).with_name("web_assets"))
+    candidates.append(Path(__file__).parent / "src" / "miditrack" / "web_assets")
+
+    for candidate in candidates:
+        if candidate.is_dir() and (candidate / "index.html").is_file():
+            return candidate
+
     return Path(__file__).with_name("web_assets")
 
 
@@ -363,6 +381,14 @@ def create_app(
     def handle_large_upload(_error: RequestEntityTooLarge) -> tuple[Response, int]:
         return jsonify(error=t("ファイルのサイズが大きすぎます")), 413
 
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error: Exception) -> tuple[Response, int]:
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        code = getattr(error, "code", 500) if hasattr(error, "code") and isinstance(error.code, int) else 500
+        desc = getattr(error, "description", None) or str(error) or t("サーバー内部エラーが発生しました")
+        return jsonify(error=str(desc)), code
+
 
     @app.get("/")
     def index() -> Response:
@@ -388,7 +414,10 @@ def create_app(
 
     @app.get("/api/instruments")
     def get_instruments() -> Response:
-        return jsonify(families=instrument_catalog())
+        return jsonify(
+            families=instrument_catalog(),
+            drumKits=[{"program": prog, "name": name} for prog, name in gm.GM_DRUM_KITS],
+        )
 
     @app.get("/api/preferences")
     def get_preferences() -> Response:
@@ -493,7 +522,7 @@ def create_app(
 
     def _validate_render_mode(raw_mode: Any) -> str:
         """APIから受け取った試聴モードを検証して返す。"""
-        mode = raw_mode if raw_mode is not None else FAST_RENDER_MODE
+        mode = raw_mode if raw_mode is not None else QUALITY_RENDER_MODE
         if mode not in RENDER_SAMPLE_RATES:
             raise WebValidationError(t("renderModeはfastまたはqualityで指定してください"))
         return mode
@@ -573,6 +602,8 @@ def create_app(
             source_volumes,
             speed=speed,
             transpose=transpose,
+            channels=dict(web_session.track_channels),
+            names=dict(web_session.track_names),
         )
 
     def _apply_to(
@@ -1486,7 +1517,7 @@ def create_app(
         if web_session.original_path is None or web_session.root is None:
             raise WebValidationError(t("MIDIファイルがアップロードされていません"))
         applied_path = ensure_applied()
-        download_name = f"{_effective_download_stem(web_session)}_miditrack.mid"
+        download_name = f"{_effective_download_stem(web_session)}.mid"
         return send_file(
             applied_path,
             mimetype="audio/midi",
@@ -1499,7 +1530,7 @@ def create_app(
         if web_session.root is None or web_session.original_path is None:
             raise WebValidationError(t("MIDIファイルがアップロードされていません"))
         outcome = ensure_render(QUALITY_RENDER_MODE, activate_player=False)
-        download_name = f"{_effective_download_stem(web_session)}_miditrack.wav"
+        download_name = f"{_effective_download_stem(web_session)}.wav"
         return send_file(
             outcome.path,
             mimetype="audio/wav",

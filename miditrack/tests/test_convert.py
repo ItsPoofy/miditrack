@@ -88,20 +88,23 @@ class TestResolveConverterArgv0(unittest.TestCase):
     def test_repo_relative_nsf2midi_is_found_by_default(self) -> None:
         argv0 = convert.resolve_converter_argv0(convert.format_by_key("nsf"))
         self.assertEqual(len(argv0), 1)
-        self.assertTrue(argv0[0].endswith("nsf2midi/nsf2midi"))
+        normalized = argv0[0].replace("\\", "/")
+        self.assertTrue(normalized.endswith("nsf2midi/nsf2midi") or normalized.endswith("nsf2midi/nsf2midi.exe"))
         self.assertTrue(Path(argv0[0]).is_file())
 
     def test_repo_relative_spc2midi_is_found_by_default(self) -> None:
         argv0 = convert.resolve_converter_argv0(convert.format_by_key("spc"))
         self.assertEqual(len(argv0), 1)
-        self.assertTrue(argv0[0].endswith("spc2midi/spc2midi"))
+        normalized = argv0[0].replace("\\", "/")
+        self.assertTrue(normalized.endswith("spc2midi/spc2midi") or normalized.endswith("spc2midi/spc2midi.exe"))
         self.assertTrue(Path(argv0[0]).is_file())
 
     def test_repo_relative_vgm2midi_prepends_node(self) -> None:
         argv0 = convert.resolve_converter_argv0(convert.format_by_key("vgm"))
         self.assertEqual(len(argv0), 2)
-        self.assertTrue(argv0[0].endswith("node") or argv0[0] == "node")
-        self.assertTrue(argv0[1].endswith("vgm2midi/dist/cli.js"))
+        node_path = argv0[0].lower().replace("\\", "/")
+        self.assertTrue(node_path.endswith("node") or node_path == "node" or node_path.endswith("node.exe"))
+        self.assertTrue(argv0[1].replace("\\", "/").endswith("vgm2midi/dist/cli.js"))
 
 
 class TestParseNsfList(unittest.TestCase):
@@ -227,7 +230,21 @@ class TestOptionSchemaAndValidation(unittest.TestCase):
         options = convert.validate_convert_options(convert.format_by_key("vgm"), [], {"loops": 2})
         self.assertEqual(options["loops"], 2)
         self.assertIsNone(options["durationSeconds"])
-        self.assertNotIn("tempo", options)
+        self.assertIsNone(options["tempo"])
+        self.assertTrue(options["autoTempo"])
+
+    def test_vgm_manual_tempo_with_auto_tempo_false_succeeds(self) -> None:
+        options = convert.validate_convert_options(
+            convert.format_by_key("vgm"), [], {"autoTempo": False, "tempo": 145}
+        )
+        self.assertFalse(options["autoTempo"])
+        self.assertEqual(options["tempo"], 145)
+
+    def test_vgm_manual_tempo_with_auto_tempo_true_raises_conflict(self) -> None:
+        with self.assertRaises(WebValidationError):
+            convert.validate_convert_options(
+                convert.format_by_key("vgm"), [], {"autoTempo": True, "tempo": 145}
+            )
 
     def test_chip_noise_appears_in_nsf_and_vgm_schemas(self) -> None:
         nsf_names = {field["name"] for field in convert.option_schema(convert.format_by_key("nsf"))}
@@ -259,8 +276,8 @@ class TestOptionSchemaAndValidation(unittest.TestCase):
             for item in convert.option_schema(convert.format_by_key("vgm"))
             if item["name"] == "ch3SpecialPercussion"
         )
-        self.assertEqual(field["label"], "OPN Ch3 SpecialをGMドラムに変換")
-        self.assertIn("YM2203/YM2608/YM2612", field["help"])
+        self.assertEqual(field["label"], "OPN Ch3ドラム変換")
+        self.assertNotIn("help", field)
 
     def test_game_soundfont_is_spc_only(self) -> None:
         nsf_names = {field["name"] for field in convert.option_schema(convert.format_by_key("nsf"))}
@@ -300,13 +317,14 @@ class TestOptionSchemaAndValidation(unittest.TestCase):
             ]
             self.assertEqual(timing_fields, ["loops", "durationSeconds"], format_key)
 
-    def test_tempo_option_removed_from_all_formats(self) -> None:
-        # VGMのテンポ(BPM)は変換時の実際の音・再生時間に影響しない目盛りに
-        # 過ぎず、変換後の「全体の速度」機能で調整できるため、オプションと
-        # しては公開しない（_build_argv()が常に120をハードコードする）。
-        for format_key in ("nsf", "spc", "vgm"):
+    def test_tempo_option_schema(self) -> None:
+        for format_key in ("nsf", "spc"):
             names = {field["name"] for field in convert.option_schema(convert.format_by_key(format_key))}
             self.assertNotIn("tempo", names, format_key)
+        vgm_names = {field["name"] for field in convert.option_schema(convert.format_by_key("vgm"))}
+        self.assertIn("tempo", vgm_names)
+        self.assertIn("autoTempo", vgm_names)
+        self.assertIn("preserveChipTuning", vgm_names)
 
     def test_unavailable_timing_fields_per_format(self) -> None:
         nsf_schema = {f["name"]: f for f in convert.option_schema(convert.format_by_key("nsf"))}
@@ -324,8 +342,7 @@ class TestOptionSchemaAndValidation(unittest.TestCase):
     def test_unavailable_fields_have_help_reason(self) -> None:
         for format_key in ("nsf", "spc", "vgm"):
             for field in convert.option_schema(convert.format_by_key(format_key)):
-                if field.get("unavailable"):
-                    self.assertTrue(field.get("help"), f"{format_key}.{field['name']}")
+                self.assertNotIn("help", field, f"{format_key}.{field['name']}")
 
     def test_unavailable_field_value_from_client_is_forced_to_default(self) -> None:
         songs = [{"index": 0, "label": "A"}]
@@ -420,18 +437,35 @@ class TestBuildArgv(unittest.TestCase):
         self.assertEqual(argv[argv.index("--duration") + 1], "45")
         self.assertNotIn("--loops", argv)
 
-    def test_vgm_argv_always_uses_fixed_tempo(self) -> None:
-        # テンポ(BPM)はオプションとして公開しない(option_schema()参照)。
-        # クライアントからtempoキーが送られてこなくても、また任意の値が
-        # 紛れ込んでいても、常に120固定でvgm2midiへ渡す。
-        argv = convert._build_argv(
+    def test_vgm_argv_tempo_options(self) -> None:
+        argv_auto = convert._build_argv(
             convert.format_by_key("vgm"),
             self.source_path,
             self.output_path,
-            {"loops": None, "durationSeconds": None},
+            {"loops": None, "durationSeconds": None, "autoTempo": True, "tempo": None},
         )
-        self.assertIn("-t", argv)
-        self.assertEqual(argv[argv.index("-t") + 1], "120")
+        self.assertIn("--auto-tempo", argv_auto)
+        self.assertNotIn("-t", argv_auto)
+
+        argv_manual = convert._build_argv(
+            convert.format_by_key("vgm"),
+            self.source_path,
+            self.output_path,
+            {"loops": None, "durationSeconds": None, "autoTempo": False, "tempo": 145},
+        )
+        self.assertIn("-t", argv_manual)
+        self.assertEqual(argv_manual[argv_manual.index("-t") + 1], "145")
+        self.assertNotIn("--auto-tempo", argv_manual)
+
+        argv_fallback = convert._build_argv(
+            convert.format_by_key("vgm"),
+            self.source_path,
+            self.output_path,
+            {"loops": None, "durationSeconds": None, "autoTempo": False, "tempo": None},
+        )
+        self.assertIn("-t", argv_fallback)
+        self.assertEqual(argv_fallback[argv_fallback.index("-t") + 1], "120")
+        self.assertNotIn("--auto-tempo", argv_fallback)
 
     def test_nsf_argv_always_requests_track_metadata_regardless_of_chip_noise(self) -> None:
         # chipNoiseはトラックごとの音源選択(web.py側の"game"プリセレクト)を
@@ -511,7 +545,7 @@ class TestBuildArgv(unittest.TestCase):
             },
         )
         self.assertIn("--ch3-special-percussion", argv)
-        self.assertEqual(argv[-2], "--ch3-special-percussion")
+        self.assertIn("--no-chip-tuning", argv)
         self.assertEqual(argv[-1], str(self.source_path))
 
     def test_vgm_argv_omits_ch3_special_percussion_when_disabled(self) -> None:
@@ -526,6 +560,32 @@ class TestBuildArgv(unittest.TestCase):
             },
         )
         self.assertNotIn("--ch3-special-percussion", argv)
+
+    def test_vgm_argv_adds_no_chip_tuning_by_default(self) -> None:
+        argv = convert._build_argv(
+            convert.format_by_key("vgm"),
+            self.source_path,
+            self.output_path,
+            {
+                "loops": None,
+                "durationSeconds": None,
+                "preserveChipTuning": False,
+            },
+        )
+        self.assertIn("--no-chip-tuning", argv)
+
+    def test_vgm_argv_omits_no_chip_tuning_when_preserve_chip_tuning_enabled(self) -> None:
+        argv = convert._build_argv(
+            convert.format_by_key("vgm"),
+            self.source_path,
+            self.output_path,
+            {
+                "loops": None,
+                "durationSeconds": None,
+                "preserveChipTuning": True,
+            },
+        )
+        self.assertNotIn("--no-chip-tuning", argv)
 
 
     def test_spc_argv_always_adds_sf2_when_game_soundfont_enabled(self) -> None:
@@ -1077,6 +1137,29 @@ class TestExtractZipMembers(unittest.TestCase):
         bad_zip.write_bytes(b"not a real zip")
         with self.assertRaises(WebValidationError):
             convert.extract_zip_members(bad_zip, self.root / "out")
+
+    def test_detect_vgm_console_from_chips(self) -> None:
+        header = bytearray(b"\x00" * 256)
+        header[:4] = b"Vgm "
+        header[8:12] = (0x151).to_bytes(4, "little")
+        # YM2612 at 0x2C
+        header[0x2C:0x30] = (7670453).to_bytes(4, "little")
+        vgm_path = self.root / "genesis.vgm"
+        vgm_path.write_bytes(header)
+        res = convert.detect_vgm_console(vgm_path)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["ja"], "メガドライブ")
+
+        # YM2608 at 0x48
+        header2 = bytearray(b"\x00" * 256)
+        header2[:4] = b"Vgm "
+        header2[8:12] = (0x151).to_bytes(4, "little")
+        header2[0x48:0x4C] = (7987200).to_bytes(4, "little")
+        vgm_path2 = self.root / "pc98.vgm"
+        vgm_path2.write_bytes(header2)
+        res2 = convert.detect_vgm_console(vgm_path2)
+        self.assertIsNotNone(res2)
+        self.assertEqual(res2["ja"], "PC-88 / PC-98")
 
 
 if __name__ == "__main__":

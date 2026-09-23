@@ -105,6 +105,10 @@ class SourceService:
         metadata, songs = self._read_source_details(source_format, path)
         session.source_metadata = metadata
         session.source_songs = songs
+        session.source_detected_tempo = convert.probe_tempo(source_format, path)
+        session.source_console = (
+            convert.detect_vgm_console(path) if source_format.key == "vgm" else None
+        )
 
     def convert_source(
         self, raw_options: dict[str, Any], start_prewarm: Callable[[], None]

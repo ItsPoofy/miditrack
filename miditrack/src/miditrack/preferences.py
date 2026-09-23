@@ -84,6 +84,10 @@ def preferences_path() -> Path:
     override = os.environ.get("MIDITRACK_PREFERENCES_PATH")
     if override:
         return Path(override)
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return base / "miditrack" / "preferences.json"
     return Path.home() / "Library" / "Application Support" / "miditrack" / "preferences.json"
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -52,15 +53,19 @@ class SessionService:
         return soundfont_payload(self._session, self._default_soundfont)
 
     def update_tracks(self, body: dict[str, Any]) -> dict[str, Any]:
-        """音色・音量・音源の差分を検証して反映する。"""
+        """音色・音量・音源・チャンネル・トラック名の差分を検証して反映する。"""
         tracks = self._session.require_tracks()
         raw_assignments = body.get("assignments", {})
         raw_volumes = body.get("volumes", {})
         raw_sources = body.get("sources", {})
-        self._validate_track_maps(raw_assignments, raw_volumes, raw_sources)
+        raw_channels = body.get("channels", {})
+        raw_names = body.get("names", {})
+        self._validate_track_maps(raw_assignments, raw_volumes, raw_sources, raw_channels, raw_names)
         assignments = self._parse_optional_ints(raw_assignments, "GMプログラム番号")
         volumes = self._parse_optional_ints(raw_volumes, "トラック音量")
         sources = self._parse_sources(raw_sources, {track.index for track in tracks})
+        channels = self._parse_optional_ints(raw_channels, "チャンネル番号")
+        names = self._parse_names(raw_names, {track.index for track in tracks})
         validated_assignments = midi.validate_assignments(tracks, assignments)
         validated_volumes = midi.validate_volumes(tracks, volumes)
         validated_sources = validate_track_sources(self._session, tracks, sources)
@@ -72,6 +77,8 @@ class SessionService:
             validated_assignments,
             validated_volumes,
             validated_sources,
+            channels,
+            names,
         )
         self._session.invalidate_render()
         return session_payload(self._session)
@@ -107,7 +114,11 @@ class SessionService:
 
     @staticmethod
     def _validate_track_maps(
-        assignments: Any, volumes: Any, sources: Any
+        assignments: Any,
+        volumes: Any,
+        sources: Any,
+        channels: Any = None,
+        names: Any = None,
     ) -> None:
         if not isinstance(assignments, dict):
             raise WebValidationError(t("assignmentsはオブジェクトで指定してください"))
@@ -115,8 +126,12 @@ class SessionService:
             raise WebValidationError(t("volumesはオブジェクトで指定してください"))
         if not isinstance(sources, dict):
             raise WebValidationError(t("sourcesはオブジェクトで指定してください"))
-        if not assignments and not volumes and not sources:
-            raise WebValidationError(t("assignments、volumes、sourcesのいずれかを指定してください"))
+        if channels is not None and not isinstance(channels, dict):
+            raise WebValidationError(t("channelsはオブジェクトで指定してください"))
+        if names is not None and not isinstance(names, dict):
+            raise WebValidationError(t("namesはオブジェクトで指定してください"))
+        if not assignments and not volumes and not sources and not channels and not names:
+            raise WebValidationError(t("assignments、volumes、sources、channels、namesのいずれかを指定してください"))
 
     @staticmethod
     def _parse_optional_ints(raw_values: dict[Any, Any], label: str) -> dict[int, int | None]:
@@ -129,10 +144,27 @@ class SessionService:
             if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
                 if label == "GMプログラム番号":
                     message = t("GMプログラム番号は整数で指定してください: {value}", value=value)
+                elif label == "チャンネル番号":
+                    message = t("チャンネル番号は整数で指定してください: {value}", value=value)
                 else:
                     message = t("トラック音量は整数で指定してください: {value}", value=value)
                 raise WebValidationError(message)
             parsed[track_index] = value
+        return parsed
+
+    @staticmethod
+    def _parse_names(raw_names: dict[Any, Any], valid_indices: set[int]) -> dict[int, str]:
+        parsed: dict[int, str] = {}
+        for key, value in raw_names.items():
+            try:
+                track_index = int(key)
+            except (TypeError, ValueError):
+                raise WebValidationError(t("トラック番号が不正です: {key}", key=key)) from None
+            if not isinstance(value, str):
+                raise WebValidationError(t("トラック名は文字列で指定してください: {value}", value=value))
+            if track_index not in valid_indices:
+                raise WebValidationError(t("トラック番号が不正です: {track_index}", track_index=track_index))
+            parsed[track_index] = value.strip()
         return parsed
 
     @staticmethod
@@ -159,6 +191,8 @@ class SessionService:
         validated_assignments: dict[int, int],
         validated_volumes: dict[int, int],
         validated_sources: dict[int, str],
+        channels: dict[int, int | None] | None = None,
+        names: dict[int, str] | None = None,
     ) -> None:
         tracks_by_index = {track.index: track for track in tracks}
         for track_index, value in assignments.items():
@@ -178,6 +212,26 @@ class SessionService:
             track = tracks_by_index[track_index]
             if source == "soundfont" and track.editable:
                 self._session.assignments.setdefault(track_index, DEFAULT_GM_PROGRAM)
+        if channels:
+            for track_index, ch in channels.items():
+                if ch is not None and 0 <= ch <= 15:
+                    self._session.track_channels[track_index] = ch
+        if names:
+            for track_index, nm in names.items():
+                if nm is not None:
+                    self._session.track_names[track_index] = nm
+        new_tracks = []
+        for track in self._session.tracks:
+            ch = self._session.track_channels.get(track.index)
+            nm = self._session.track_names.get(track.index)
+            new_tracks.append(
+                dataclasses.replace(
+                    track,
+                    name=nm if nm is not None else track.name,
+                    channels=(ch,) if ch is not None else track.channels,
+                )
+            )
+        self._session.tracks = new_tracks
 
     def _apply_legacy_source_switch(
         self,

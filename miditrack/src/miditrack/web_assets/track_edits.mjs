@@ -14,13 +14,17 @@ export function createTrackEditController({
   let pendingAssignments = {};
   let pendingVolumes = {};
   let pendingSources = {};
+  let pendingChannels = {};
+  let pendingNames = {};
   let flushTimer = null;
   let activeFlush = null;
 
-  function queueEdits({ assignments = {}, volumes = {}, sources = {} }) {
+  function queueEdits({ assignments = {}, volumes = {}, sources = {}, channels = {}, names = {} }) {
     Object.assign(pendingAssignments, assignments);
     Object.assign(pendingVolumes, volumes);
     Object.assign(pendingSources, sources);
+    Object.assign(pendingChannels, channels);
+    Object.assign(pendingNames, names);
   }
 
   function queueAssignment(trackIndex, program) {
@@ -35,10 +39,20 @@ export function createTrackEditController({
     queueEdits({ sources: { [trackIndex]: source } });
   }
 
+  function queueChannel(trackIndex, channel) {
+    queueEdits({ channels: { [trackIndex]: channel } });
+  }
+
+  function queueName(trackIndex, name) {
+    queueEdits({ names: { [trackIndex]: name } });
+  }
+
   function hasPending() {
     return Object.keys(pendingAssignments).length > 0
       || Object.keys(pendingVolumes).length > 0
-      || Object.keys(pendingSources).length > 0;
+      || Object.keys(pendingSources).length > 0
+      || Object.keys(pendingChannels).length > 0
+      || Object.keys(pendingNames).length > 0;
   }
 
   function hasPendingVolume(trackIndex) {
@@ -63,10 +77,14 @@ export function createTrackEditController({
       assignments: pendingAssignments,
       volumes: pendingVolumes,
       sources: pendingSources,
+      channels: pendingChannels,
+      names: pendingNames,
     };
     pendingAssignments = {};
     pendingVolumes = {};
     pendingSources = {};
+    pendingChannels = {};
+    pendingNames = {};
     return edits;
   }
 
@@ -90,7 +108,9 @@ export function createTrackEditController({
     hasPending,
     hasPendingVolume,
     queueAssignment,
+    queueChannel,
     queueEdits,
+    queueName,
     queueSource,
     queueVolume,
     scheduleFlush,

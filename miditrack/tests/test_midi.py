@@ -83,11 +83,11 @@ class TestAnalyzeMidiFile(unittest.TestCase):
         self.assertTrue(track.editable)
         self.assertIsNone(track.reason)
 
-    def test_percussion_channel_is_not_editable(self) -> None:
+    def test_percussion_channel_is_editable(self) -> None:
         _, tracks = midi.analyze_midi_file(self.fixture_path)
         track = tracks[1]
-        self.assertFalse(track.editable)
-        self.assertEqual(track.reason, "percussion")
+        self.assertTrue(track.editable)
+        self.assertIsNone(track.reason)
 
     def test_multi_channel_track_is_not_editable(self) -> None:
         _, tracks = midi.analyze_midi_file(self.fixture_path)
@@ -210,9 +210,8 @@ class TestSourceVolumePercent(unittest.TestCase):
         self.assertEqual(self.tracks[3].source_volume_percent, 100)
 
     def test_percussion_channel_cc7_is_still_adopted(self) -> None:
-        # 音量の採用可否はプログラムチェンジの編集可否（editable）とは独立。
         track = self.tracks[4]
-        self.assertFalse(track.editable)
+        self.assertTrue(track.editable)
         self.assertEqual(track.source_volume_percent, 64)
 
     def test_no_cc7_defaults_to_100(self) -> None:
@@ -241,8 +240,6 @@ class TestValidateAssignments(unittest.TestCase):
             midi.validate_assignments(self.tracks, {99: 5})
 
     def test_non_editable_track_raises(self) -> None:
-        with self.assertRaises(WebValidationError):
-            midi.validate_assignments(self.tracks, {1: 5})  # percussion
         with self.assertRaises(WebValidationError):
             midi.validate_assignments(self.tracks, {3: 5})  # multi-channel
         with self.assertRaises(WebValidationError):
@@ -343,7 +340,7 @@ class TestApplyAssignments(unittest.TestCase):
     def test_apply_on_non_editable_track_raises(self) -> None:
         output_path = Path(self.tmp.name) / "out.mid"
         with self.assertRaises(WebValidationError):
-            midi.apply_assignments(self.fixture_path, {1: 5}, output_path)
+            midi.apply_assignments(self.fixture_path, {3: 5}, output_path)
 
     def test_original_file_is_never_mutated(self) -> None:
         output_path = Path(self.tmp.name) / "out.mid"

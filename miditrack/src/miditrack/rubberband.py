@@ -55,7 +55,8 @@ def transform_stem(
 
     try:
         try:
-            result = subprocess.run(
+            from .tooling import safe_subprocess_run
+            result = safe_subprocess_run(
                 argv,
                 shell=False,
                 capture_output=True,

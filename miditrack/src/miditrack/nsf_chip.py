@@ -161,7 +161,8 @@ def render_selection(
         str(output_path),
     ]
     try:
-        result = subprocess.run(
+        from .tooling import safe_subprocess_run
+        result = safe_subprocess_run(
             command,
             capture_output=True,
             text=True,

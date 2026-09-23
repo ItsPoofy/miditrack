@@ -234,43 +234,25 @@ class TestWebApp(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("javascript", response.content_type)
 
-    def test_render_mode_radios_stay_visually_hidden_while_focused(self) -> None:
-        html = self.client.get("/").get_data(as_text=True)
-        css = self.client.get("/assets/app.css").get_data(as_text=True)
-
-        self.assertIn('class="render-mode-input" type="radio"', html)
-        self.assertNotIn('class="visually-hidden" type="radio" name="render-mode"', html)
-        self.assertIn('label for="render-mode-fast"', html)
-        self.assertIn('label for="render-mode-quality"', html)
-        hidden_rule = css.split(".render-mode-input {", 1)[1].split("}", 1)[0]
-        self.assertIn("position: absolute !important", hidden_rule)
-        self.assertIn("clip-path: inset(50%) !important", hidden_rule)
-
-    def test_render_mode_toggle_is_compact_and_spinner_reserves_playback_space(self) -> None:
+    def test_soundfont_row_has_no_render_mode_toggle_and_spinner_reserves_playback_space(self) -> None:
         html = self.client.get("/").get_data(as_text=True)
         css = self.client.get("/assets/app.css").get_data(as_text=True)
         soundfont_row = html.split('<div class="soundfont-row">', 1)[1].split(
             '<p class="field-help" id="soundfont-help">', 1
         )[0]
 
-        self.assertLess(
-            soundfont_row.index("soundfont-select"),
-            soundfont_row.index("render-mode-field"),
-        )
-        self.assertIn('<label for="render-mode-fast" data-i18n>高速</label>', soundfont_row)
-        self.assertIn('<label for="render-mode-quality" data-i18n>品質</label>', soundfont_row)
+        self.assertIn('id="soundfont-select"', soundfont_row)
+        self.assertNotIn("render-mode-field", soundfont_row)
+        self.assertNotIn("render-mode-fast", soundfont_row)
+        self.assertNotIn("render-mode-quality", soundfont_row)
         self.assertNotIn("22.05kHzで素早く確認", html)
         self.assertNotIn("最終WAVと同じ44.1kHz", html)
         row_rule = css.split(".soundfont-row {", 1)[1].split("}", 1)[0]
-        field_rule = css.split(".render-mode-field {", 1)[1].split("}", 1)[0]
-        options_rule = css.split(".render-mode-options {", 1)[1].split("}", 1)[0]
         spinner_slot_rule = css.split(".render-spinner-slot {", 1)[1].split("}", 1)[0]
         audition_toolbar = html.split('<div class="toolbar audition-toolbar">', 1)[1].split(
             '<!-- 試聴用<audio>を2枚', 1
         )[0]
-        self.assertIn("grid-template-columns: minmax(0, 1fr) auto", row_rule)
-        self.assertIn("align-self: stretch", field_rule)
-        self.assertIn("height: 100%", options_rule)
+        self.assertIn("grid-template-columns: minmax(0, 1fr)", row_rule)
         self.assertNotIn('id="render-spinner"', soundfont_row)
         self.assertLess(
             audition_toolbar.index('class="playback-controls"'),
@@ -385,8 +367,7 @@ class TestWebApp(unittest.TestCase):
         self.assertIn("音源またはMIDIを選択", html)
         self.assertIn('id="tracks-card-heading"', html)
         self.assertIn("トラックごとの音源・楽器・音量", html)
-        self.assertIn('<span class="app-title-subtitle">GM Instrument Assigner</span>', html)
-        self.assertIn(".app-title-subtitle {\n  font-size: 0.68em", css)
+        self.assertIn('<h1>miditrack</h1>', html)
         self.assertIn("#open-dialog-button,\n#open-dialog-close { display: none; }", css)
         self.assertIn("body.is-fullscreen #open-dialog-button { display: inline-flex; }", css)
         self.assertIn("body.is-fullscreen #open-dialog > #upload-card {", css)
@@ -567,16 +548,14 @@ class TestWebApp(unittest.TestCase):
         javascript = self.client.get("/assets/app.js").get_data(as_text=True)
 
         self.assertIn(
-            "function requestRenderGeneration(generation, { preferPreview = false } = {})",
+            "function requestRenderGeneration(generation)",
             javascript,
         )
         self.assertIn("async function ensureLatestRender()", javascript)
         self.assertIn("async function playPreparedPlayer(player)", javascript)
         self.assertIn("scheduleAutoRender(0);", javascript)
         self.assertIn('apiFetch("/api/render", {', javascript)
-        self.assertIn('apiFetch("/api/render/preview", {', javascript)
-        self.assertIn("requestRenderGeneration(generation, { preferPreview: true })", javascript)
-        self.assertIn('...(background ? { priority: "low" } : {}),', javascript)
+        self.assertIn("requestRenderGeneration(generation)", javascript)
         self.assertNotIn('apiFetch("/api/render/prewarm", {', javascript)
         self.assertIn("if (!isCurrentRenderGeneration(generation)) return null;", javascript)
         self.assertIn("await ensureLatestRender();", javascript)
@@ -601,9 +580,8 @@ class TestWebApp(unittest.TestCase):
         self.assertTrue(payload["tracks"][0]["editable"])
         self.assertEqual(payload["tracks"][0]["currentProgram"], 80)
         self.assertEqual(payload["tracks"][0]["volumePercent"], 100)
-        self.assertTrue(payload["tracks"][0]["volumeEditable"])
-        self.assertFalse(payload["tracks"][1]["editable"])
-        self.assertEqual(payload["tracks"][1]["reason"], "percussion")
+        self.assertTrue(payload["tracks"][1]["editable"])
+        self.assertIsNone(payload["tracks"][1]["reason"])
         self.assertTrue(payload["tracks"][1]["volumeEditable"])
 
     def test_upload_wrong_extension_is_rejected(self) -> None:
@@ -645,7 +623,7 @@ class TestWebApp(unittest.TestCase):
         response = self.client.patch(
             "/api/session/tracks",
             headers={**AUTH_HEADERS, "Content-Type": "application/json"},
-            data=json.dumps({"assignments": {"1": 5}}),
+            data=json.dumps({"assignments": {"99": 5}}),
         )
         self.assertEqual(response.status_code, 400)
 
@@ -921,7 +899,7 @@ class TestWebApp(unittest.TestCase):
             data=json.dumps({"name": "my song"}),
         )
         response = self.client.get("/api/download", headers=AUTH_HEADERS)
-        self.assertIn("my song_miditrack.mid", response.headers.get("Content-Disposition", ""))
+        self.assertIn("my song.mid", response.headers.get("Content-Disposition", ""))
 
     def test_download_wav_uses_custom_filename(self) -> None:
         self._upload()
@@ -931,7 +909,7 @@ class TestWebApp(unittest.TestCase):
             data=json.dumps({"name": "my song"}),
         )
         response = self.client.get("/api/download/wav", headers=AUTH_HEADERS)
-        self.assertIn("my song_miditrack.wav", response.headers.get("Content-Disposition", ""))
+        self.assertIn("my song.wav", response.headers.get("Content-Disposition", ""))
 
     def test_variations_zip_and_members_use_custom_filename(self) -> None:
         self._upload()
@@ -1187,11 +1165,16 @@ class TestWebApp(unittest.TestCase):
 
     def test_download_wav_renders_quality_after_fast_preview(self) -> None:
         self._upload()
-        self.client.post("/api/render", headers=AUTH_HEADERS)
+        self.client.post(
+            "/api/render",
+            headers={**AUTH_HEADERS, "Content-Type": "application/json"},
+            data=json.dumps({"renderMode": "fast"}),
+        )
         self.assertEqual(len(self.render_calls), 1)
         response = self.client.get("/api/download/wav", headers=AUTH_HEADERS)
         self.assertEqual(response.status_code, 200)
-        # 既定の高速試聴(22.05kHz)は最終WAVとして流用せず、品質レンダーを行う。
+        response.close()
+        # 高速試聴(22.05kHz)は最終WAVとして流用せず、品質レンダーを行う。
         self.assertEqual(len(self.render_calls), 2)
 
     def test_download_wav_reuses_quality_preview(self) -> None:
@@ -1205,11 +1188,16 @@ class TestWebApp(unittest.TestCase):
         self.assertEqual(len(self.render_calls), 1)
         response = self.client.get("/api/download/wav", headers=AUTH_HEADERS)
         self.assertEqual(response.status_code, 200)
+        response.close()
         self.assertEqual(len(self.render_calls), 1)
 
     def test_render_modes_are_cached_independently(self) -> None:
         self._upload()
-        fast = self.client.post("/api/render", headers=AUTH_HEADERS).get_json()
+        fast = self.client.post(
+            "/api/render",
+            headers={**AUTH_HEADERS, "Content-Type": "application/json"},
+            data=json.dumps({"renderMode": "fast"}),
+        ).get_json()
         quality = self.client.post(
             "/api/render",
             headers={**AUTH_HEADERS, "Content-Type": "application/json"},
@@ -4831,9 +4819,9 @@ class TestWebAppPreferences(unittest.TestCase):
         self.assertIn("await flushPendingDownloadFilename();", javascript)
         self.assertIn('apiFetch("/api/project/import"', javascript)
         self.assertIn('id="pianoroll-loop-region"', html)
-        self.assertIn('id="ensemble-preset-select"', html)
-        self.assertIn('id="ensemble-preset-new"', html)
-        self.assertIn('id="ensemble-preset-dialog"', html)
+        self.assertNotIn('id="ensemble-preset-select"', html)
+        self.assertNotIn('id="ensemble-preset-new"', html)
+        self.assertNotIn('id="ensemble-preset-dialog"', html)
         self.assertIn("function suggestTrackRoles()", javascript)
         self.assertIn("function handleEnsemblePresetSave", javascript)
         self.assertIn("function setupTrackHighlightControl", javascript)

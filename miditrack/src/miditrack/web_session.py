@@ -75,6 +75,10 @@ class WebSession:
     converted_options: dict[str, Any] = field(default_factory=dict)
     source_files: list[dict[str, str]] = field(default_factory=list)
     source_m3u_texts: list[str] = field(default_factory=list)
+    track_names: dict[int, str] = field(default_factory=dict)
+    track_channels: dict[int, int] = field(default_factory=dict)
+    source_detected_tempo: int | None = None
+    source_console: dict[str, str] | None = None
 
     def clear_render_cache(self) -> None:
         """試聴・最終WAV・実機ステムのセッション内キャッシュを破棄する。"""
@@ -100,12 +104,12 @@ class WebSession:
     def reset_midi_state(self) -> None:
         """MIDI由来の状態だけを初期状態へ戻す。"""
         self.clear_render_cache()
-        if self.audio_path is not None:
-            self.audio_path.unlink(missing_ok=True)
-        if self.variations_zip_path is not None:
-            self.variations_zip_path.unlink(missing_ok=True)
-        if self.track_export_zip_path is not None:
-            self.track_export_zip_path.unlink(missing_ok=True)
+        for path in (self.audio_path, self.variations_zip_path, self.track_export_zip_path):
+            if path is not None:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         self.original_path = None
         self.original_name = ""
         self.download_stem = ""
@@ -130,6 +134,8 @@ class WebSession:
         self.dac_stem_path = None
         self.game_soundfont_path = None
         self.converted_options = {}
+        self.track_names = {}
+        self.track_channels = {}
 
     def clear(self) -> None:
         """現在の一時ディレクトリと全入力状態を破棄する。"""
@@ -138,6 +144,8 @@ class WebSession:
         self.root = None
         self.reset_midi_state()
         self.source_path = None
+        self.source_detected_tempo = None
+        self.source_console = None
         self.source_name = ""
         self.source_format = None
         self.source_metadata = {}
@@ -351,6 +359,21 @@ def soundfont_payload(
     }
 
 
+def get_session_bpm(session: WebSession) -> int:
+    """現在のセッションMIDIファイルのBPMを検出する。"""
+    if session.original_path and session.original_path.exists():
+        try:
+            mido = midi.import_mido()
+            mf = mido.MidiFile(session.original_path)
+            for track in mf.tracks:
+                for msg in track:
+                    if msg.is_meta and msg.type == "set_tempo":
+                        return round(mido.tempo2bpm(msg.tempo))
+        except Exception:
+            pass
+    return 120
+
+
 def source_payload(session: WebSession) -> dict[str, Any] | None:
     """音源由来の状態を既存HTTP契約のJSON要素へ直列化する。"""
     if session.source_format is None:
@@ -359,13 +382,20 @@ def source_payload(session: WebSession) -> dict[str, Any] | None:
     active_file = None
     if session.source_path is not None and session.root is not None:
         active_file = session.source_path.relative_to(session.root).as_posix()
+    format_label = t(source_format.label)
+    if session.source_format == "vgm" and session.source_console:
+        console_name = session.source_console.get("ja") or session.source_console.get("en")
+        if console_name:
+            format_label = f"VGM / VGZ ({console_name})"
     return {
         "name": session.source_name,
         "format": source_format.key,
-        "formatLabel": t(source_format.label),
+        "formatLabel": format_label,
+        "console": session.source_console,
         "metadata": session.source_metadata,
         "songs": session.source_songs,
-        "options": convert.option_schema(source_format),
+        "options": convert.option_schema(source_format, session.source_detected_tempo),
+        "detectedTempo": session.source_detected_tempo,
         "files": session.source_files,
         "activeFile": active_file,
         "hasPlaylist": len(session.source_m3u_texts) > 0,
@@ -380,6 +410,7 @@ def session_payload(session: WebSession) -> dict[str, Any]:
         "downloadStem": session.download_stem,
         "ticksPerBeat": session.ticks_per_beat,
         "trackCount": len(session.tracks),
+        "bpm": get_session_bpm(session),
         "tracks": [
             track_payload(
                 track,

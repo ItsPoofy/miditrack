@@ -86,7 +86,7 @@ const MIN_LOOP_SECONDS = 0.1;
 // 合流する（例: 全トラック一括ミュート）。
 const RENDER_DEBOUNCE_DISCRETE_MS = 0;
 // 速度/ピッチのように値がドラッグ・連続入力で変わりうる操作のデバウンス。
-const RENDER_DEBOUNCE_CONTINUOUS_MS = 250;
+const RENDER_DEBOUNCE_CONTINUOUS_MS = 100;
 const THEME_MODES = new Set(["system", "light", "dark"]);
 const LANGUAGE_MODES = new Set(["system", "ja", "en"]);
 const PIANOROLL_HEIGHTS = new Set(["compact", "standard", "tall"]);
@@ -189,12 +189,11 @@ const state = {
   ensemblePresetSnapshot: null,
   playbackTimeFrameId: null,
   pointerActivatedControl: null,
-  renderMode: "fast",
+  renderMode: "quality",
   autoRenderTimer: null,
   renderGeneration: 0,
   renderTask: null,
   renderTaskGeneration: null,
-  renderTaskUsesPreview: false,
   fullRenderTask: null,
   // 現在の<audio>が曲全体タイムラインのどの範囲を表すか。短区間WAVの
   // currentTimeは窓内ローカル秒なので、すべての表示・シークはここを介して
@@ -604,7 +603,7 @@ function setBusy(isBusy, message = "") {
 }
 
 function selectedRenderMode() {
-  return document.querySelector('input[name="render-mode"]:checked')?.value || "fast";
+  return "quality";
 }
 
 function setRenderSpinner(isVisible) {
@@ -664,42 +663,12 @@ function sourceContainsTimelineSeconds(seconds, source = state.activeSource) {
 
 // 指定世代の試聴音声を生成し、停止中は無音で、再生中はクロスフェードで差し替える。
 // 後発の編集に追い越された応答は、プレイヤーへ反映しない。
-async function renderGeneration(generation, { preferPreview = false } = {}) {
+async function renderGeneration(generation) {
   const renderMode = selectedRenderMode();
   if (!state.session || state.session.tracks.length === 0) return null;
   if (isCurrentRenderGeneration(generation)) setRenderSpinner(true);
   try {
-    let player = activePlayer();
-    let didActivatePreview = false;
-    if (preferPreview) {
-      const previewResponse = await apiFetch("/api/render/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          renderMode,
-          stateRevision: state.session.stateRevision,
-          timelineSeconds: sourceGlobalSeconds(),
-        }),
-      });
-      const preview = await previewResponse.json();
-      if (!isCurrentRenderGeneration(generation)) return null;
-      if (preview.available) {
-        applyRenderPayload(preview);
-        player = await crossfadeToRender(
-          preview.renderId,
-          () => isCurrentRenderGeneration(generation),
-          sourceFromPayload(preview),
-        );
-        didActivatePreview = true;
-        if (!isCurrentRenderGeneration(generation)) return null;
-        await applyPendingPianorollReload();
-        if (!isCurrentRenderGeneration(generation)) return null;
-        clearRenderStale();
-        updatePianorollInteraction();
-        updatePianorollPlayhead();
-      }
-    }
-    const renderTask = renderFullGeneration(generation, renderMode, { background: preferPreview });
+    const renderTask = renderFullGeneration(generation, renderMode);
     const fullTask = renderTask.finally(() => {
       if (state.fullRenderTask !== fullTask) return;
       state.fullRenderTask = null;
@@ -707,7 +676,7 @@ async function renderGeneration(generation, { preferPreview = false } = {}) {
     });
     state.fullRenderTask = fullTask;
     fullTask.catch(() => {});
-    return didActivatePreview ? player : fullTask;
+    return fullTask;
   } catch (error) {
     if (isCurrentRenderGeneration(generation)) showStatus(error.message, "error");
     throw error;
@@ -742,54 +711,34 @@ async function renderFullGeneration(generation, renderMode, { background = false
 }
 
 // 同じ編集世代なら、自動処理・再生操作・ソロ試聴で1つのレンダーを共有する。
-function requestRenderGeneration(generation, { preferPreview = false } = {}) {
+function requestRenderGeneration(generation) {
   if (
     state.renderTask
     && state.renderTaskGeneration === generation
-    && (state.renderTaskUsesPreview || !preferPreview)
   ) {
     return state.renderTask;
   }
-  const task = renderGeneration(generation, { preferPreview });
+  const task = renderGeneration(generation);
   state.renderTask = task;
   state.renderTaskGeneration = generation;
-  state.renderTaskUsesPreview = preferPreview;
   task.finally(() => {
     if (state.renderTask === task) {
       state.renderTask = null;
       state.renderTaskGeneration = null;
-      state.renderTaskUsesPreview = false;
     }
   }).catch(() => {});
   return task;
 }
 
-// トラック設定・SoundFont・速度/ピッチ・試聴モード等の変更から操作が無かったら、
-// 最新状態を自動レンダーする。再生中の編集は先に短区間プレビュー（約300ms）を
-// 鳴らし、裏で仕上げた全尺へ後からクロスフェードで乗り換える —
-// ensureLatestRender()（Space・ソロ開始時）と全く同じpreferPreview経路。
-// プレビューは常にfast(22050Hz)で焼くため、明示的にquality試聴を選んでいる間は
-// 一瞬fastの音を聴かせないよう対象から外す。停止中の編集はプレビューを鳴らす
-// 相手（再生中の音）が無く体感価値も無いので、従来どおり全尺だけを仕上げる。
+// トラック設定・SoundFont・速度/ピッチ等の変更から操作が無かったら、最新状態を自動レンダーする。
 function scheduleAutoRender(delay = RENDER_DEBOUNCE_DISCRETE_MS) {
   cancelAutoRender();
   if (!state.session || state.session.tracks.length === 0) return;
   const generation = state.renderGeneration;
   state.autoRenderTimer = setTimeout(() => {
     state.autoRenderTimer = null;
-    // 発火時点の再生状態で判定する（スケジュール時点ではなく）。デバウンス中に
-    // 再生が始まる／止まることがあるため。
-    const preferPreview = isActivePlayerPlaying() && selectedRenderMode() === "fast";
-    requestRenderGeneration(generation, { preferPreview }).catch(() => {});
+    requestRenderGeneration(generation).catch(() => {});
   }, delay);
-}
-
-function handleRenderModeChange(event) {
-  if (!event.target.checked) return;
-  state.renderMode = event.target.value;
-  markRenderStale();
-  updateSectionsReadiness();
-  scheduleAutoRender();
 }
 
 // GM音色カタログを一度だけ取得し、16 <optgroup> のDocumentFragmentを構築する。
@@ -825,35 +774,30 @@ function formatBytes(bytes) {
 function renderSoundfontOptions(payload) {
   state.soundfontPayload = payload;
   const select = $("#soundfont-select");
-  select.innerHTML = "";
+  const currentItems = Array.from(select.options).slice(1).map((o) => o.value);
+  const newItems = (payload.items || []).map((item) => item.path);
+  const itemsChanged = currentItems.length !== newItems.length || currentItems.some((v, i) => v !== newItems[i]);
 
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = t("既定（自動選択）");
-  select.appendChild(defaultOption);
+  if (itemsChanged || select.options.length === 0) {
+    select.innerHTML = "";
 
-  for (const item of payload.items) {
-    const option = document.createElement("option");
-    option.value = item.path;
-    option.textContent = `${item.name} (${formatBytes(item.sizeBytes)}) — ${item.dir}`;
-    select.appendChild(option);
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = t("既定（自動選択）");
+    select.appendChild(defaultOption);
+
+    for (const item of (payload.items || [])) {
+      const option = document.createElement("option");
+      option.value = item.path;
+      option.textContent = item.name;
+      select.appendChild(option);
+    }
   }
   select.value = payload.selected || "";
 
   const help = $("#soundfont-help");
-  if (payload.items.length === 0) {
-    help.textContent = t(
-      "SoundFontが見つかりません。MIDI2WAV_SOUNDFONT環境変数か起動時の --soundfont で指定してください。"
-    );
-  } else if (payload.isOverride) {
-    help.textContent = t("選択したSoundFontを使用します。");
-  } else {
-    help.textContent = t(
-      "既定の解決順（起動時の --soundfont / MIDI2WAV_SOUNDFONT環境変数 / 検索ディレクトリ）で選ばれます。"
-    );
-  }
-  if (state.session && state.session.hasGameSoundfont) {
-    help.textContent += " " + t("ここで選んだSoundFontは、音源をSoundFontにしたトラックに適用されます。");
+  if (help) {
+    help.textContent = "";
   }
 }
 
@@ -869,6 +813,8 @@ async function loadSoundfonts() {
 async function handleSoundfontChange() {
   const select = $("#soundfont-select");
   const path = select.value || null;
+  markRenderStale();
+  updateSectionsReadiness();
   try {
     const response = await apiFetch("/api/soundfont", {
       method: "POST",
@@ -876,9 +822,7 @@ async function handleSoundfontChange() {
       body: JSON.stringify({ path }),
     });
     renderSoundfontOptions(await response.json());
-    markRenderStale();
-    updateSectionsReadiness();
-    scheduleAutoRender();
+    scheduleAutoRender(0);
   } catch (error) {
     showStatus(error.message, "error");
   }
@@ -1140,30 +1084,75 @@ async function buildTrackRow(track, rowState = state) {
   };
   rowState.trackRows.push(trackRowRef);
 
+  const isPercussion = track.channels.length === 1 && track.channels[0] === 9;
+
+  const channelCell = document.createElement("td");
+  channelCell.className = "track-channel";
+  const channelInput = document.createElement("input");
+  channelInput.type = "number";
+  channelInput.className = "track-channel-input";
+  channelInput.min = "1";
+  channelInput.max = "16";
+  channelInput.step = "1";
+  if (isPercussion) {
+    channelInput.value = "10";
+    channelInput.disabled = true;
+    channelInput.title = t("パーカッション専用チャンネル（Ch 10）");
+    channelInput.setAttribute("aria-label", t("パーカッション専用チャンネル 10"));
+  } else if (track.channels.length === 1) {
+    channelInput.value = String(track.channels[0] + 1);
+    channelInput.setAttribute("aria-label", t("{name}のチャンネル番号", { name: track.name }));
+    channelInput.addEventListener("change", () => {
+      const chVal = parseInt(channelInput.value, 10);
+      if (!Number.isNaN(chVal) && chVal >= 1 && chVal <= 16) {
+        trackEditController.queueChannel(track.index, chVal - 1);
+        trackEditController.scheduleFlush();
+      } else {
+        channelInput.value = String(track.channels[0] + 1);
+      }
+    });
+  } else {
+    channelInput.value = track.channels.length ? String(track.channels[0] + 1) : "";
+    channelInput.disabled = true;
+  }
+  channelCell.appendChild(channelInput);
+  row.appendChild(channelCell);
+
   const nameCell = document.createElement("td");
   nameCell.className = "track-name-cell";
-  const nameLabel = document.createElement("button");
-  nameLabel.type = "button";
-  nameLabel.className = "track-name";
-  nameLabel.setAttribute("aria-label", t("{name}を押している間、ピアノロールで強調表示", { name: track.name }));
+  const nameRow = document.createElement("div");
+  nameRow.className = "track-name-row";
+
+  const colorBtn = document.createElement("button");
+  colorBtn.type = "button";
+  colorBtn.className = "track-color-btn";
+  colorBtn.title = t("{name}を押している間、ピアノロールで強調表示", { name: track.name });
+  colorBtn.setAttribute("aria-label", t("{name}の強調表示", { name: track.name }));
   const colorBar = document.createElement("span");
   colorBar.className = "track-color-bar";
   colorBar.setAttribute("aria-hidden", "true");
   colorBar.style.setProperty("--track-color", getTrackColor(track.index, state.session?.tracks.length || 1));
-  const nameText = document.createElement("span");
-  nameText.className = "track-name-text";
-  nameText.textContent = track.name;
-  nameLabel.append(colorBar, nameText);
-  setupTrackHighlightControl(nameLabel, track.index);
-  nameCell.appendChild(nameLabel);
-  row.appendChild(nameCell);
+  colorBtn.appendChild(colorBar);
+  setupTrackHighlightControl(colorBtn, track.index);
 
-  const channelCell = document.createElement("td");
-  channelCell.className = "track-channel";
-  channelCell.textContent = track.channels.length
-    ? track.channels.map((c) => c + 1).join(", ")
-    : "—";
-  row.appendChild(channelCell);
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "track-name-input";
+  nameInput.value = track.name || "";
+  nameInput.setAttribute("aria-label", t("トラック名"));
+  nameInput.addEventListener("change", () => {
+    if (nameInput.value.trim() !== track.name) {
+      trackEditController.queueName(track.index, nameInput.value.trim());
+      trackEditController.scheduleFlush();
+    }
+  });
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") nameInput.blur();
+  });
+
+  nameRow.append(colorBtn, nameInput);
+  nameCell.appendChild(nameRow);
+  row.appendChild(nameCell);
 
   const sourceCell = document.createElement("td");
   if (track.availableSources.length > 1) {
@@ -1179,6 +1168,39 @@ async function buildTrackRow(track, rowState = state) {
   if (track.editable) {
     if (activeEnsemblePreset()) {
       instrumentCell.appendChild(createTrackRoleControl(track, trackRowRef));
+    } else if (isPercussion) {
+      const select = document.createElement("select");
+      select.className = "program-select instrument-select";
+      select.dataset.trackIndex = String(track.index);
+
+      const keepOption = document.createElement("option");
+      keepOption.value = KEEP_ORIGINAL;
+      keepOption.textContent = t("変更しない（現在: {current}）", { current: formatCurrentProgram(track) });
+      select.appendChild(keepOption);
+      createPercussionKitOptions(select);
+
+      select.value =
+        track.assignedProgram !== null && track.assignedProgram !== undefined
+          ? String(track.assignedProgram)
+          : String(track.currentProgram ?? 0);
+      select.disabled = track.source !== "soundfont";
+
+      select.addEventListener("change", () => {
+        onProgramChange(track.index, select.value);
+      });
+      select.addEventListener("mousedown", (event) => {
+        if (isBulkApplyEvent(event) && select.value !== KEEP_ORIGINAL) {
+          event.preventDefault();
+          applyProgramToAllTracks(select.value, track.index);
+        }
+      });
+
+      const selectRow = document.createElement("div");
+      selectRow.className = "instrument-select-row";
+      selectRow.appendChild(select);
+      instrumentCell.appendChild(selectRow);
+      rowState.instrumentRows.push({ select, updatePinButton: () => {} });
+      trackRowRef.programSelect = select;
     } else {
     const fragment = await loadInstrumentOptions();
     const select = document.createElement("select");
@@ -1220,7 +1242,9 @@ async function buildTrackRow(track, rowState = state) {
     const updatePinButton = () => {
       const program = select.value === KEEP_ORIGINAL ? null : Number(select.value);
       const pinned = isProgramPinned(program);
-      pinButton.textContent = pinned ? "★" : "☆";
+      pinButton.innerHTML = pinned
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
       pinButton.title = pinned ? t("ピン留めを解除") : t("よく使う楽器としてピン留め");
       pinButton.classList.toggle("is-pinned", pinned);
       pinButton.disabled = program === null || select.disabled;
@@ -1307,7 +1331,9 @@ async function buildTrackRow(track, rowState = state) {
     muteButton.className = "mute-button";
     const updateMuteButton = () => {
       const isMuted = Number(slider.value) === 0;
-      muteButton.textContent = isMuted ? "🔇" : "🔊";
+      muteButton.innerHTML = isMuted
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm11.7.3-1.4 1.4 1.3 1.3-1.3 1.3 1.4 1.4 1.3-1.3 1.3 1.3 1.4-1.4-1.3-1.3 1.3-1.3-1.4-1.4-1.3 1.3-1.3-1.3Z"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2.25-3.9v7.8A4.5 4.5 0 0 0 16.5 12Zm-2.25-8.7v2.08a7 7 0 0 1 0 13.24v2.08a9 9 0 0 0 0-17.4Z"/></svg>';
       muteButton.title = isMuted ? t("ミュートを解除") : t("ミュート");
       muteButton.setAttribute(
         "aria-label",
@@ -1354,7 +1380,7 @@ async function buildTrackRow(track, rowState = state) {
     soloButton.className = "solo-button";
     const updateSoloButton = () => {
       const isSolo = state.soloTrackIndex === track.index;
-      soloButton.textContent = "🎧";
+      soloButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-9 9v7a3 3 0 0 0 3 3h1a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2H5v-1a7 7 0 1 1 14 0v1h-2a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h1a3 3 0 0 0 3-3v-7a9 9 0 0 0-9-9Z"/></svg>';
       soloButton.title = isSolo ? t("ソロ試聴を解除") : t("このトラックだけを試聴");
       soloButton.setAttribute(
         "aria-label",
@@ -1728,6 +1754,7 @@ async function handleEnsemblePresetDelete() {
 
 function setupEnsemblePresets() {
   const select = $("#ensemble-preset-select");
+  if (!select) return;
   select.addEventListener("change", handleEnsemblePresetChange);
   $("#ensemble-preset-new").addEventListener("click", () => openEnsemblePresetDialog());
   $("#ensemble-preset-edit").addEventListener("click", () => {
@@ -1854,12 +1881,18 @@ async function exitSolo() {
   }
 }
 
-async function commitTrackEdits({ assignments, volumes, sources }) {
+async function commitTrackEdits({ assignments, volumes, sources, channels, names }) {
   try {
+    const payload = {};
+    if (assignments && Object.keys(assignments).length) payload.assignments = assignments;
+    if (volumes && Object.keys(volumes).length) payload.volumes = volumes;
+    if (sources && Object.keys(sources).length) payload.sources = sources;
+    if (channels && Object.keys(channels).length) payload.channels = channels;
+    if (names && Object.keys(names).length) payload.names = names;
     const response = await apiFetch("/api/session/tracks", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assignments, volumes, sources }),
+      body: JSON.stringify(payload),
     });
     state.session = await response.json();
     // レンダー要求（markRenderStale→scheduleAutoRender）を先に発行する。
@@ -2669,8 +2702,6 @@ function updateSectionsReadiness() {
   $("#tracks-card").classList.toggle("ready", ready);
   $("#audition-card").classList.toggle("ready", ready);
   $("#output-card").classList.toggle("ready", ready);
-  document.querySelectorAll('input[name="render-mode"]')
-    .forEach((control) => { control.disabled = !ready; });
   $("#download-button").disabled = !(state.session && state.session.hasDownload);
   $("#download-wav-button").disabled = !(state.session && state.session.hasDownload);
   $("#download-filename").disabled = !(state.session && state.session.hasDownload);
@@ -2722,13 +2753,16 @@ function renderTransformFields(payload) {
   // 速度は0.1刻みのUIに合わせ、整数でも"1"ではなく"1.0"と常に小数第1位まで表示する。
   $("#transform-speed").value = speed.toFixed(1);
   $("#transform-transpose").value = String(transpose);
+  const baseBpm = (payload && typeof payload.bpm === "number") ? payload.bpm : (state.session?.bpm || 120);
+  const tempoInput = $("#transform-tempo");
+  if (tempoInput) tempoInput.value = String(Math.round(baseBpm * speed));
 }
 
 // セッションのダウンロードファイル名（downloadStem）をテキスト欄へ反映する。
 // 明示指定（downloadStem）が無ければ、アップロード時のファイル名（filename）を
 // 初期値として表示する。
 function renderDownloadFilenameField(payload) {
-  const stem = (payload && payload.downloadStem) || (payload && payload.filename) || "";
+  const stem = payload?.downloadStem || "";
   $("#download-filename").value = stem;
 }
 
@@ -2766,8 +2800,6 @@ async function refreshFromSession(payload, { restoreConvertedOptions = false, ui
     : (state.ensemblePresetId ? captureEnsemblePresetSnapshot() : null);
   if (["fast", "quality"].includes(payload.renderMode)) {
     state.renderMode = payload.renderMode;
-    const modeInput = $(`#render-mode-${state.renderMode}`);
-    if (modeInput) modeInput.checked = true;
   }
   resetPianorollZoom();
   await renderTrackList();
@@ -2816,7 +2848,12 @@ function stepTransformInput(inputId, direction) {
   else input.stepUp();
   // stepUp()/stepDown()は末尾の".0"を落とした値（例:"1"）を入力欄へセットするため、
   // 速度欄だけは常に小数第1位まで表示する規約に合わせて上書きする。
-  if (inputId === "#transform-speed") input.value = Number(input.value).toFixed(1);
+  if (inputId === "#transform-speed") {
+    input.value = Number(input.value).toFixed(1);
+    const baseBpm = state.session?.bpm || 120;
+    const tempoInput = $("#transform-tempo");
+    if (tempoInput) tempoInput.value = String(Math.round(baseBpm * Number(input.value)));
+  }
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -3073,6 +3110,7 @@ function updateConvertFieldConflicts() {
       (other) => values[other] !== null && values[other] !== undefined && values[other] !== false
     );
     const blocked = blockingNames.length > 0;
+    const wasBlocked = entry.input.disabled;
     entry.input.disabled = blocked;
     entry.wrapper.classList.toggle("is-disabled", blocked);
     entry.wrapper.title = blocked
@@ -3080,6 +3118,10 @@ function updateConvertFieldConflicts() {
           names: blockingNames.map((name) => labelsByName[name] || name).join(t("・")),
         })
       : "";
+    if (entry.name === "tempo" && wasBlocked && !blocked && entry.input.value === "") {
+      const detectedTempo = state.session?.source?.detectedTempo || entry.input.placeholder;
+      if (detectedTempo) entry.input.value = String(detectedTempo);
+    }
   }
 }
 
@@ -3132,8 +3174,10 @@ function renderConvertPanel(source, restoredConvertedOptions = null) {
     "has-timing-group",
     source.options.some((field) => field.layoutGroup === "timing"),
   );
+  const consoleName = source.console ? (uiLang === "ja" ? source.console.ja : source.console.en) : "";
+  const formatLabel = consoleName ? `VGM / VGZ (${consoleName})` : source.formatLabel;
   $("#convert-panel-title").textContent = t("{format} として検出しました（{name}）", {
-    format: source.formatLabel,
+    format: formatLabel,
     name: source.name,
   });
 
@@ -3203,7 +3247,11 @@ function gatherConvertOptions() {
     options.songIndex = Number($("#convert-song-select").value);
   }
   for (const entry of state.convertFields) {
-    options[entry.name] = readConvertFieldValue(entry);
+    if (entry.input.disabled) continue;
+    const val = readConvertFieldValue(entry);
+    if (val !== null && val !== undefined) {
+      options[entry.name] = val;
+    }
   }
   return options;
 }
@@ -3405,7 +3453,7 @@ async function ensureLatestRender() {
       return activePlayer();
     }
     const generation = state.renderGeneration;
-    const player = await requestRenderGeneration(generation, { preferPreview: true });
+    const player = await requestRenderGeneration(generation);
     if (player && isCurrentRenderGeneration(generation)) return player;
   }
   return null;
@@ -3772,6 +3820,23 @@ async function downloadFrom(path, fallbackName, busyMessage, options = {}) {
     const disposition = response.headers.get("Content-Disposition") || "";
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
     const filename = match ? decodeURIComponent(match[1]) : fallbackName;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_file) {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result;
+          resolve(typeof res === "string" ? res.split(",")[1] : "");
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const saved = await window.pywebview.api.save_file(filename, base64);
+      if (saved) {
+        showStatus(t("保存しました: {filename}", { filename }), "success");
+      }
+      return Boolean(saved);
+    }
+
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -3779,7 +3844,7 @@ async function downloadFrom(path, fallbackName, busyMessage, options = {}) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
     return true;
   } catch (error) {
     showStatus(error.message, "error");
@@ -3880,8 +3945,6 @@ async function applyProjectImportPayload(payload) {
   const renderMode = payload.uiState?.renderMode;
   if (["fast", "quality"].includes(renderMode)) {
     state.renderMode = renderMode;
-    const modeInput = $(`#render-mode-${renderMode}`);
-    if (modeInput) modeInput.checked = true;
   }
   resetPlayer();
   await refreshFromSession(payload.session, {
@@ -4332,8 +4395,6 @@ async function init() {
   $("#open-project-button").addEventListener("click", () => $("#project-input").click());
   $("#project-input").addEventListener("change", (event) => handleOpenProject(event.target.files?.[0]));
   $("#save-project-button").addEventListener("click", handleSaveProject);
-  document.querySelectorAll('input[name="render-mode"]')
-    .forEach((control) => control.addEventListener("change", handleRenderModeChange));
   $("#download-button").addEventListener("click", handleDownload);
   $("#download-wav-button").addEventListener("click", handleDownloadWav);
   $("#download-filename").addEventListener("input", onDownloadFilenameChange);
@@ -4342,13 +4403,50 @@ async function init() {
   $("#convert-button").addEventListener("click", handleConvert);
   $("#convert-file-select").addEventListener("change", handleSelectFile);
   $("#soundfont-select").addEventListener("change", handleSoundfontChange);
-  $("#transform-speed").addEventListener("input", onTransformChange);
+  const updateTempoFromSpeed = () => {
+    const baseBpm = state.session?.bpm || 120;
+    const speed = Number($("#transform-speed").value) || 1.0;
+    const tempoInput = $("#transform-tempo");
+    if (tempoInput) tempoInput.value = String(Math.round(baseBpm * speed));
+  };
+  $("#transform-speed").addEventListener("input", () => {
+    updateTempoFromSpeed();
+    onTransformChange();
+  });
+  $("#transform-tempo").addEventListener("input", () => {
+    const tempoVal = Number($("#transform-tempo").value);
+    if (!Number.isNaN(tempoVal) && tempoVal > 0) {
+      const baseBpm = state.session?.bpm || 120;
+      const speed = Math.max(0.1, Math.min(10.0, Math.round((tempoVal / baseBpm) * 10) / 10));
+      $("#transform-speed").value = speed.toFixed(1);
+      onTransformChange();
+    }
+  });
+  $("#transform-tempo").addEventListener("change", (event) => {
+    const tempoVal = Number(event.target.value);
+    if (Number.isNaN(tempoVal) || tempoVal <= 0) {
+      updateTempoFromSpeed();
+    }
+  });
+  $("#transform-tempo-down").addEventListener("click", () => {
+    const input = $("#transform-tempo");
+    const val = Math.max(20, (Number(input.value) || 120) - 1);
+    input.value = String(val);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  $("#transform-tempo-up").addEventListener("click", () => {
+    const input = $("#transform-tempo");
+    const val = Math.min(999, (Number(input.value) || 120) + 1);
+    input.value = String(val);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
   $("#transform-transpose").addEventListener("input", onTransformChange);
   // 手入力で確定した（blur/Enter）タイミングで、常に小数第1位までの表示に揃える。
   // "input"イベント（タイプ中）で都度書き換えるとカーソル位置がずれるため使わない。
   $("#transform-speed").addEventListener("change", (event) => {
     const value = Number(event.target.value);
     if (!Number.isNaN(value)) event.target.value = value.toFixed(1);
+    updateTempoFromSpeed();
   });
   $("#transform-speed-down").addEventListener("click", () => stepTransformInput("#transform-speed", -1));
   $("#transform-speed-up").addEventListener("click", () => stepTransformInput("#transform-speed", 1));

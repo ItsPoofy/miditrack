@@ -204,7 +204,8 @@ class RenderService:
         assert self._session.root is not None
         cache_dir = self._session.root / "render-cache"
         cache_dir.mkdir(exist_ok=True)
-        return cache_dir / f"{kind}-{cache_key[:24]}.wav"
+        safe_key = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in cache_key)
+        return cache_dir / f"{kind}-{safe_key[:24]}.wav"
 
     def ensure_applied(
         self,

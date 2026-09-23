@@ -8,7 +8,9 @@ subprocess.run() に明示的なargvリストを shell=False で渡し、シェ�
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .errors import RenderError
@@ -21,7 +23,7 @@ _SOUNDFONT_EXTENSIONS = (".sf2", ".sf3")
 
 def default_soundfont_dirs() -> list[Path]:
     """midi2wav.sh の DEFAULT_SOUNDFONT_DIRS と同じ探索順を返す（同じディレクトリ・同じ順序）。"""
-    return [
+    dirs = [
         Path.home() / "Library/Audio/Sounds/Banks",
         Path("/Library/Audio/Sounds/Banks"),
         Path("/opt/homebrew/share/soundfonts"),
@@ -29,6 +31,17 @@ def default_soundfont_dirs() -> list[Path]:
         Path("/opt/homebrew/share/fluid-synth/sf2"),
         Path("/usr/local/share/fluid-synth/sf2"),
     ]
+    if os.name == "nt":
+        user_profile = Path(os.environ.get("USERPROFILE", Path.home()))
+        appdata = Path(os.environ.get("APPDATA", user_profile / "AppData" / "Roaming"))
+        dirs.extend([
+            user_profile / "SoundFonts",
+            user_profile / "Sounds" / "Banks",
+            appdata / "miditrack" / "soundfonts",
+            Path("C:/Program Files/Image-Line/FL Studio 2026/Data/Patches/Soundfonts"),
+            Path("C:/bin"),
+        ])
+    return dirs
 
 
 def list_soundfonts(dirs: list[Path] | None = None) -> list[dict]:
@@ -112,6 +125,54 @@ def render_wav(
     if soundfont:
         argv += ["-s", str(soundfont)]
     argv += ["-r", str(sample_rate), "-o", str(wav_path), str(midi_path)]
+
+    if os.name == "nt":
+        # Windows: directly run fluidsynth without bash script or python -m
+        fluidsynth_bin = os.environ.get("FLUIDSYNTH_BIN") or shutil.which("fluidsynth")
+        if not fluidsynth_bin and getattr(sys, "frozen", False):
+            helpers = Path(sys.executable).parent / "_internal" / "Helpers"
+            if (helpers / "fluidsynth.exe").is_file():
+                fluidsynth_bin = str(helpers / "fluidsynth.exe")
+            elif (Path(sys.executable).parent / "fluidsynth.exe").is_file():
+                fluidsynth_bin = str(Path(sys.executable).parent / "fluidsynth.exe")
+        if not fluidsynth_bin and Path("C:/bin/fluidsynth.exe").is_file():
+            fluidsynth_bin = "C:/bin/fluidsynth.exe"
+
+        sf = soundfont
+        if not sf:
+            sf_list = list_soundfonts()
+            if sf_list:
+                sf = Path(sf_list[0]["path"])
+
+        if not fluidsynth_bin or not sf:
+            raise RenderError("fluidsynth or soundfont not available on Windows")
+
+        gain = os.environ.get("MIDITRACK_FLUIDSYNTH_GAIN", "1.0")
+        cmd = [
+            str(fluidsynth_bin),
+            "-ni",
+            "-q",
+            "-o", "synth.dynamic-sample-loading=1",
+            "-o", "synth.cpu-cores=4",
+            "-g", str(gain),
+            "-F", str(wav_path),
+            "-T", "wav",
+            "-r", str(sample_rate),
+            str(sf),
+            str(midi_path),
+        ]
+        try:
+            from .tooling import safe_subprocess_run
+            res = safe_subprocess_run(cmd, capture_output=True, text=True, timeout=RENDER_TIMEOUT_SECONDS)
+            if res.returncode != 0:
+                tail = stderr_tail(res.stderr, _STDERR_TAIL_LINES)
+                raise RenderError(f"fluidsynth error:\n{tail}")
+        except subprocess.TimeoutExpired as error:
+            raise RenderError(f"Rendering timed out after {RENDER_TIMEOUT_SECONDS}s") from error
+
+        if not has_wave_audio(wav_path):
+            raise RenderError("Failed to write WAV output")
+        return
 
     try:
         result = subprocess.run(

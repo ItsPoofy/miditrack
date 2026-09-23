@@ -12,7 +12,7 @@ export function createTrackListController({
   onSortChange,
   queryAll = (selector) => document.querySelectorAll(selector),
 }) {
-  let sort = { key: "index", direction: "asc" };
+  let sort = { key: "channel", direction: "asc" };
 
   function trackSortValue(track, key) {
     if (key === "index") return track.index;
