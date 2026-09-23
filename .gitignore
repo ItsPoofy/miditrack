@@ -26,3 +26,13 @@ testdata/real-corpus/
 *.pyc
 *.sf2
 *.sf3
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+vgm2midi/native/build*/
+vgm2midi/native/bin/
+build/
+dist/miditrack/

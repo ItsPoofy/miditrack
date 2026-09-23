@@ -25,7 +25,7 @@ std::string ToLowerAscii(const std::string& s) {
 std::filesystem::path ReplaceExtension(const std::filesystem::path& path, const std::string& ext) {
   std::string p = path.string();
   size_t dot = p.find_last_of('.');
-  size_t slash = p.find_last_of('/');
+  size_t slash = p.find_last_of("/\\");
   if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
     return std::filesystem::path(p + "." + ext);
   }

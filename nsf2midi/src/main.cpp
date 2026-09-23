@@ -16,7 +16,14 @@
 #include <string>
 #include <vector>
 
+#if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include "NSF_Core.h"
 #include "NSF_File.h"
@@ -99,12 +106,21 @@ void PrintUsage(const char* prog) {
 // process was launched, and is the standard way macOS command-line tools
 // solve this. Returns an empty string if unavailable for any reason.
 std::string ExecutablePath() {
+#if defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);  // First call: get required buffer size.
     if (size == 0) return "";
     std::vector<char> buffer(size);
     if (_NSGetExecutablePath(buffer.data(), &size) != 0) return "";
     return std::string(buffer.data());
+#elif defined(_WIN32)
+    char buffer[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    if (len == 0) return "";
+    return std::string(buffer, len);
+#else
+    return "";
+#endif
 }
 
 // gm.mdf (reproduction-fidelity preset) is the default when -m/--mdf is not
