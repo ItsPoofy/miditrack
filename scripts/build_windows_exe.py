@@ -1,7 +1,7 @@
-"""Build standalone Windows executable package for miditrack.
+"""Build standalone Windows executable package for VGMidi.
 
-Creates dist/miditrack containing:
-- miditrack.exe (native desktop GUI embedding WebView2)
+Creates dist/VGMidi containing:
+- VGMidi.exe (native desktop GUI embedding WebView2)
 - all web assets and backend logic
 - bundled helpers: nsf2midi.exe, spc2midi.exe, vgm2midi, node.exe, fluidsynth.exe, ffmpeg.exe
 - bundled SoundFont (GeneralUser-GS.sf2)
@@ -22,7 +22,7 @@ def main():
     dist_dir = repo_dir / "dist"
     build_dir = repo_dir / "build" / "pyinstaller"
 
-    print("=== Building miditrack Windows Executable ===")
+    print("=== Building VGMidi Windows Executable ===")
 
     # 1. Verify helpers
     nsf_bin = repo_dir / "nsf2midi" / "nsf2midi.exe"
@@ -52,7 +52,7 @@ def main():
         "--onedir",
         "--windowed",
         "--name",
-        "miditrack",
+        "VGMidi",
         "--paths",
         str(repo_dir / "miditrack" / "src"),
         "--collect-data",
@@ -81,7 +81,7 @@ def main():
     if res.returncode != 0:
         sys.exit(f"PyInstaller failed with code {res.returncode}")
 
-    app_dist_dir = dist_dir / "miditrack"
+    app_dist_dir = dist_dir / "VGMidi"
     print(f"PyInstaller finished. App directory: {app_dist_dir}")
 
     # 3. Assemble Helpers & Resources
@@ -89,6 +89,7 @@ def main():
     helpers_dir.mkdir(parents=True, exist_ok=True)
 
     # NSF2MIDI
+    nsf_bin = repo_dir / "nsf2midi" / "nsf2midi.exe"
     shutil.copyfile(nsf_bin, helpers_dir / "nsf2midi.exe")
     for mdf in ["gm.mdf", "default.mdf"]:
         mdf_src = repo_dir / "nsf2midi" / mdf
@@ -143,27 +144,28 @@ def main():
             shutil.rmtree(web_assets_dest)
         shutil.copytree(web_assets_src, web_assets_dest)
 
-    downloads_dir = Path.home() / "Downloads" / "miditrack"
+    downloads_dir = Path.home() / "Downloads" / "VGMidi"
     if downloads_dir.exists():
         shutil.rmtree(downloads_dir)
     print(f"Deploying to {downloads_dir}...")
     shutil.copytree(app_dist_dir, downloads_dir)
 
-    # Clean up redundant copies so there is ONLY 1 miditrack.exe
+    # Clean up redundant copies so there is ONLY 1 VGMidi.exe
     print("Cleaning up intermediate copies...")
     if dist_dir.exists():
         shutil.rmtree(dist_dir)
     if build_dir.exists():
         shutil.rmtree(build_dir)
-    venv_cli = repo_dir / "miditrack" / ".venv" / "Scripts" / "miditrack.exe"
-    if venv_cli.is_file():
-        try:
-            venv_cli.unlink()
-        except OSError:
-            pass
+    for exe_name in ["VGMidi.exe", "miditrack.exe"]:
+        cli_exe = repo_dir / "miditrack" / ".venv" / "Scripts" / exe_name
+        if cli_exe.is_file():
+            try:
+                cli_exe.unlink()
+            except OSError:
+                pass
 
     print("\n[+] Standalone Windows app successfully installed at:")
-    print(f"  {downloads_dir / 'miditrack.exe'}\n")
+    print(f"  {downloads_dir / 'VGMidi.exe'}\n")
 
 
 if __name__ == "__main__":

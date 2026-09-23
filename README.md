@@ -1,12 +1,12 @@
-# miditrack
+# VGMidi
 
-miditrack is a program that lets you convert retro video game music to MIDI and preview it.
+VGMidi is a retro VGM to MIDI converter and previewer.
 
 This is a fork of [Nihondo/miditrack](https://github.com/Nihondo/miditrack) with full Windows compatibility, quality-of-life improvements, and conversion accuracy fixes.
 
 ## Features
 
-- Converts NES (`.nsf`/`.nsfe`), SNES (`.spc`/`.spc2`), and VGM/VGZ (`.vgm`/`.vgz`) files to MIDI.
+- Converts retro video game music—VGM/VGZ (Sega Genesis/Mega Drive, Arcade, SMS, Game Gear, PC Engine), NES (`.nsf`/`.nsfe`), and SNES (`.spc`/`.spc2`)—into clean, editable MIDI.
 - Built-in interactive piano roll and multi-track audio auditioning.
 - Automatic tempo and beat detection from rhythm events and hardware frame intervals.
 - Musical grid alignment and hardware sound driver startup latency compensation.
@@ -48,13 +48,13 @@ This is a fork of [Nihondo/miditrack](https://github.com/Nihondo/miditrack) with
 
 ### Building the Standalone Executable
 
-To bundle miditrack into a standalone Windows folder with `miditrack.exe`:
+To bundle VGMidi into a standalone Windows folder with `VGMidi.exe`:
 
 ```powershell
 python scripts/build_windows_exe.py
 ```
 
-The output package will be generated at `dist/miditrack/`.
+The output package will be generated at `dist/VGMidi/` (and deployed to `%USERPROFILE%\Downloads\VGMidi\`).
 
 ## Supported Formats
 
@@ -63,7 +63,7 @@ The output package will be generated at `dist/miditrack/`.
 | **vgm2midi** | Sega Genesis/MD, Arcade, SMS, GG, PC Engine (`.vgm`, `.vgz`) | Standard MIDI (`.mid`) + WAV stems | Auto tempo detection, startup preroll compensation, synchronized DAC/noise audio |
 | **spc2midi** | Super Nintendo / Super Famicom (`.spc`, `.spc2`) | Standard MIDI (`.mid`) + Game SoundFont (`.sf2`) | Native MSVC build support, instrument envelope extraction |
 | **nsf2midi** | NES / Famicom (`.nsf`, `.nsfe`) | Standard MIDI (`.mid`) | Native Windows support, multi-track export, MDF presets |
-| **miditrack** | All formats above and `.mid` files | Editable project, stems ZIP, master WAV | Desktop window, low-latency auditioning, interactive piano roll |
+| **VGMidi** | All formats above and `.mid` files | Editable project, stems ZIP, master WAV | Desktop window, low-latency auditioning, interactive piano roll |
 
 ## Command-Line Usage
 

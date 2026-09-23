@@ -175,7 +175,7 @@ class MiditrackDesktopApp:
                 break
 
         self.window = webview.create_window(
-            title="miditrack",
+            title="VGMidi",
             url=url,
             width=1280,
             height=860,
@@ -187,8 +187,8 @@ class MiditrackDesktopApp:
         self.window.events.closed += self.on_closed
         self.window.events.loaded += self.on_loaded
 
-        # Use isolated user data folder so miditrack doesn't collide with other pywebview apps
-        cache_dir = Path.home() / "AppData" / "Local" / "miditrack" / "webview2"
+        # Use isolated user data folder so VGMidi doesn't collide with other pywebview apps
+        cache_dir = Path.home() / "AppData" / "Local" / "VGMidi" / "webview2"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Start native desktop window using Edge WebView2 (gui='edgechromium')
