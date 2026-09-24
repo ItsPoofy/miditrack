@@ -521,12 +521,18 @@ function syncSettingsDialogControls() {
 
   const sfRadio = $("#sound-source-soundfont");
   const midiRadio = $("#sound-source-midi");
+  const sfLabel = $("#seg-label-soundfont");
+  const midiLabel = $("#seg-label-midi");
+  const sfSection = $("#sound-source-sf-section");
+  const midiSection = $("#sound-source-midi-section");
   if (sfRadio && midiRadio) {
-    if (state.soundSourceType === "midi") {
-      midiRadio.checked = true;
-    } else {
-      sfRadio.checked = true;
-    }
+    const isMidi = state.soundSourceType === "midi";
+    midiRadio.checked = isMidi;
+    sfRadio.checked = !isMidi;
+    if (sfLabel) sfLabel.classList.toggle("is-active-segment", !isMidi);
+    if (midiLabel) midiLabel.classList.toggle("is-active-segment", isMidi);
+    if (sfSection) sfSection.style.display = !isMidi ? "flex" : "none";
+    if (midiSection) midiSection.style.display = !isMidi ? "none" : "flex";
   }
   const driverSel = $("#audio-driver-select");
   if (driverSel && state.audioDriver) driverSel.value = state.audioDriver;
@@ -756,17 +762,50 @@ async function pauseRealtimePlayback() {
   } catch (_e) {}
 }
 
-async function seekRealtimePlayback(seconds) {
-  state.realtimeCurrentTime = Math.max(0, Math.min(state.realtimeDuration || getTimelineDuration(), seconds));
-  state.realtimeStartPerf = performance.now();
-  updatePlaybackProgress();
+let realtimeSeekTimer = null;
+let lastRealtimeSeekTime = 0;
+let pendingSeekSeconds = null;
+
+async function doRealtimeSeek(sec) {
   try {
     await apiFetch("/api/realtime/seek", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seconds: state.realtimeCurrentTime }),
+      body: JSON.stringify({ seconds: sec }),
     });
   } catch (_e) {}
+}
+
+function seekRealtimePlayback(seconds) {
+  const target = Math.max(0, Math.min(state.realtimeDuration || getTimelineDuration(), seconds));
+  state.realtimeCurrentTime = target;
+  state.realtimeStartPerf = performance.now();
+  updatePlaybackProgress();
+
+  pendingSeekSeconds = target;
+  const now = performance.now();
+  const elapsed = now - lastRealtimeSeekTime;
+
+  if (elapsed >= 35) {
+    if (realtimeSeekTimer) {
+      clearTimeout(realtimeSeekTimer);
+      realtimeSeekTimer = null;
+    }
+    lastRealtimeSeekTime = now;
+    const sec = pendingSeekSeconds;
+    pendingSeekSeconds = null;
+    doRealtimeSeek(sec);
+  } else if (!realtimeSeekTimer) {
+    realtimeSeekTimer = setTimeout(() => {
+      realtimeSeekTimer = null;
+      lastRealtimeSeekTime = performance.now();
+      if (pendingSeekSeconds !== null) {
+        const sec = pendingSeekSeconds;
+        pendingSeekSeconds = null;
+        doRealtimeSeek(sec);
+      }
+    }, 35 - elapsed);
+  }
 }
 
 function sourceGlobalSeconds(player = activePlayer(), source = state.activeSource) {
@@ -2857,7 +2896,7 @@ function pianorollSecondsAt(clientX) {
 }
 
 function seekPianorollAt(clientX) {
-  if (!state.session?.hasRender) return;
+  if (!state.realtimeActive && !state.session?.hasRender) return;
   const seconds = pianorollSecondsAt(clientX);
   if (seconds !== null) seekPlaybackTo(seconds);
 }
@@ -2870,7 +2909,8 @@ function seekPianorollAt(clientX) {
 // 素通しし、通常のカーソル移動（キャレット移動）を妨げない。
 // Cmd+←は通常の1秒戻しではなく、先頭（0秒）へ即座に戻す。
 function handleSeekKeydown(event) {
-  if (!state.session?.hasRender || !state.pianoroll || !activePlayer().getAttribute("src")) return;
+  const canSeek = state.realtimeActive || (state.session?.hasRender && activePlayer().getAttribute("src"));
+  if (!canSeek || !state.pianoroll) return;
   if (isPlaybackShortcutBlocked(event.target)) return;
   let target = null;
   if (event.metaKey && event.key === "ArrowLeft") {
@@ -2916,8 +2956,8 @@ function handlePianorollWheel(event) {
     zoomPianorollAt(event.clientX, factor);
     return;
   }
-  if (!state.session?.hasRender) return;
-  if (!activePlayer().getAttribute("src")) return;
+  const canSeek = state.realtimeActive || (state.session?.hasRender && activePlayer().getAttribute("src"));
+  if (!canSeek) return;
   if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
   event.preventDefault();
   seekPlaybackBy(-(event.deltaY / 100) * PLAYBACK_SEEK_SECONDS);
@@ -3283,6 +3323,13 @@ async function refreshFromSession(payload, { restoreConvertedOptions = false, ui
   state.soloTrackIndex = null;
   state.soloVolumeSnapshot = null;
   state.highlightedTrackIndex = null;
+  if (state.realtimePlaying) {
+    state.realtimePlaying = false;
+    stopPlaybackTimeAnimation();
+  }
+  state.realtimeCurrentTime = 0;
+  state.realtimeDuration = 0;
+  apiFetch("/api/realtime/pause", { method: "POST" }).catch(() => {});
   restoreProjectEnsemblePreset(uiState);
   state.ensemblePresetId = state.ensemblePresets.some(
     (preset) => preset.id === uiState?.ensemblePreset,

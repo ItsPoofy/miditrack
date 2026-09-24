@@ -51,7 +51,18 @@ class WinMmOutput:
         self.winmm.midiOutShortMsg(self.h_midi, msg)
 
     def reset(self):
-        if self.is_open:
+        if self.is_open and self.winmm:
+            for ch in range(16):
+                # CC 64 (Sustain Pedal) = 0
+                self.send_short(0xB0 | ch, 64, 0)
+                # CC 120 (All Sound Off) = 0
+                self.send_short(0xB0 | ch, 120, 0)
+                # CC 123 (All Notes Off) = 0
+                self.send_short(0xB0 | ch, 123, 0)
+                # CC 121 (Reset All Controllers) = 0
+                self.send_short(0xB0 | ch, 121, 0)
+                # Pitch Bend = Center
+                self.send_short(0xE0 | ch, 0, 64)
             self.winmm.midiOutReset(self.h_midi)
 
     def close(self):
@@ -161,7 +172,12 @@ class FluidSynthOutput:
     def reset(self):
         if self.is_open:
             for ch in range(16):
+                self.fs.fluid_synth_cc(self.synth, ch, 64, 0)
+                self.fs.fluid_synth_cc(self.synth, ch, 120, 0)
+                self.fs.fluid_synth_cc(self.synth, ch, 123, 0)
                 self.fs.fluid_synth_all_sounds_off(self.synth, ch)
+                self.fs.fluid_synth_all_notes_off(self.synth, ch)
+                self.fs.fluid_synth_pitch_bend(self.synth, ch, 8192)
 
     def close(self):
         if self.is_open:
@@ -208,12 +224,17 @@ class RealtimeMidiPlayer:
         self.soundfont_path: Path | None = None
 
         self.events: list[TimedMidiMessage] = []
+        self.event_times: list[float] = []
         self.duration: float = 0.0
         self.current_time: float = 0.0
         self.event_index: int = 0
         self.is_playing: bool = False
         self.start_perf_time: float = 0.0
         self.loaded_revision: int | None = None
+        self.loaded_path: str | None = None
+
+        # Active sounding notes: set of (channel, note)
+        self.active_notes: set[tuple[int, int]] = set()
 
         self.playback_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
@@ -272,6 +293,48 @@ class RealtimeMidiPlayer:
             else:
                 self.output = WinMmOutput(self.midi_device_id)
 
+    def _all_notes_off(self):
+        """Immediately stop all currently sounding notes and reset sustain/controllers."""
+        if not self.output:
+            return
+        for ch, note in list(self.active_notes):
+            try:
+                self.output.send_short(0x80 | (ch & 0x0F), note, 0)
+            except Exception:
+                pass
+        self.active_notes.clear()
+        try:
+            self.output.reset()
+        except Exception:
+            pass
+
+    def _dispatch_message(self, ev: TimedMidiMessage):
+        if not self.output:
+            return
+        cmd = ev.status & 0xF0
+        ch = ev.channel & 0x0F
+        note = ev.data1
+
+        if cmd == 0x90:
+            if ev.data2 > 0:
+                # Note On
+                if ev.track_index in self.muted_tracks:
+                    return
+                if self.solo_track is not None and self.solo_track != ev.track_index:
+                    return
+                self.active_notes.add((ch, note))
+                self.output.send_short(ev.status, ev.data1, ev.data2)
+            else:
+                # Note On with vel=0 is Note Off
+                self.active_notes.discard((ch, note))
+                self.output.send_short(0x80 | ch, note, 0)
+        elif cmd == 0x80:
+            # Note Off
+            self.active_notes.discard((ch, note))
+            self.output.send_short(ev.status, ev.data1, ev.data2)
+        else:
+            self.output.send_short(ev.status, ev.data1, ev.data2)
+
     def load_midi(
         self,
         midi_path: Path,
@@ -285,6 +348,13 @@ class RealtimeMidiPlayer:
             was_playing = self.is_playing
             if self.is_playing:
                 self.pause()
+
+            self._all_notes_off()
+            self.events.clear()
+            self.event_times.clear()
+            self.duration = 0.0
+            self.current_time = 0.0
+            self.event_index = 0
 
             self.track_assignments = dict(assignments or {})
             self.track_volumes = dict(volumes or {})
@@ -358,9 +428,11 @@ class RealtimeMidiPlayer:
 
             events.sort(key=lambda ev: ev.time)
             self.events = events
+            self.event_times = [ev.time for ev in events]
             self.duration = events[-1].time if events else 0.0
             self.current_time = 0.0
             self.event_index = 0
+            self.loaded_path = str(Path(midi_path).resolve())
 
             if self.output is None:
                 self._open_output()
@@ -379,12 +451,9 @@ class RealtimeMidiPlayer:
                 self._open_output()
 
             self.current_time = max(0.0, min(self.duration, start_seconds))
-            # Find starting event index
             import bisect
-            times = [ev.time for ev in self.events]
-            self.event_index = bisect.bisect_left(times, self.current_time)
+            self.event_index = bisect.bisect_left(self.event_times, self.current_time)
 
-            # Send state messages up to start_seconds so instruments & controls are accurate
             self._send_state_up_to(self.current_time)
             self._apply_all_track_volumes()
 
@@ -404,29 +473,41 @@ class RealtimeMidiPlayer:
             if self.playback_thread and self.playback_thread.is_alive():
                 self.playback_thread.join(timeout=0.2)
             self.playback_thread = None
+            self._all_notes_off()
 
-            if self.output:
-                self.output.reset()
+    def stop(self):
+        with self.lock:
+            self.is_playing = False
+            self.stop_event.set()
+            if self.playback_thread and self.playback_thread.is_alive():
+                self.playback_thread.join(timeout=0.2)
+            self.playback_thread = None
+            self._all_notes_off()
+            self.events.clear()
+            self.event_times.clear()
+            self.duration = 0.0
+            self.current_time = 0.0
+            self.event_index = 0
+            self.loaded_path = None
+            self.loaded_revision = None
 
     def seek(self, seconds: float):
         with self.lock:
             seconds = max(0.0, min(self.duration, seconds))
-            was_playing = self.is_playing
-            if self.is_playing:
-                self.pause()
+            # 1. Instantly silence all active notes and reset controllers
+            self._all_notes_off()
 
             self.current_time = seconds
             import bisect
-            times = [ev.time for ev in self.events]
-            self.event_index = bisect.bisect_left(times, self.current_time)
+            self.event_index = bisect.bisect_left(self.event_times, self.current_time)
 
             if self.output:
-                self.output.reset()
                 self._send_state_up_to(self.current_time)
                 self._apply_all_track_volumes()
 
-            if was_playing:
-                self.play(seconds)
+            if self.is_playing:
+                # Smoothly adjust start_perf_time without restarting the thread!
+                self.start_perf_time = time.perf_counter() - self.current_time
 
     def get_current_time(self) -> float:
         with self.lock:
@@ -505,7 +586,7 @@ class RealtimeMidiPlayer:
             ch = ev.channel
             if cmd == 0xC0:
                 latest_pc[ch] = ev.data1
-            elif cmd == 0xB0 and ev.data1 != 7:  # Preserve volume control
+            elif cmd == 0xB0 and ev.data1 != 7 and ev.data1 != 64:  # Preserve volume and release sustain pedal on seek
                 latest_cc[(ch, ev.data1)] = ev.data2
 
         for ch, prog in latest_pc.items():
@@ -535,16 +616,7 @@ class RealtimeMidiPlayer:
                         break
                     idx += 1
 
-                    # Check mute / solo for note events
-                    cmd = ev.status & 0xF0
-                    if cmd == 0x90 and ev.data2 > 0:
-                        if ev.track_index in self.muted_tracks:
-                            continue
-                        if self.solo_track is not None and self.solo_track != ev.track_index:
-                            continue
-
-                    if self.output:
-                        self.output.send_short(ev.status, ev.data1, ev.data2)
+                    self._dispatch_message(ev)
 
                 self.event_index = idx
                 self.current_time = now

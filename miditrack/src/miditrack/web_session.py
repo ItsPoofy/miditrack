@@ -109,6 +109,12 @@ class WebSession:
 
     def reset_midi_state(self) -> None:
         """MIDI由来の状態だけを初期状態へ戻す。"""
+        try:
+            from .realtime_player import player_engine
+
+            player_engine.stop()
+        except Exception:
+            pass
         self.clear_render_cache()
         for path in (self.audio_path, self.variations_zip_path, self.track_export_zip_path):
             if path is not None:

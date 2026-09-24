@@ -549,8 +549,10 @@ def create_app(
         if web_session.original_path and web_session.original_path.is_file():
             sf_path = web_session.soundfont_override or soundfont
             player_engine.configure(soundfont_path=sf_path)
+            orig_resolved = str(web_session.original_path.resolve())
             if (
                 force
+                or getattr(player_engine, "loaded_path", None) != orig_resolved
                 or getattr(player_engine, "loaded_revision", None) != web_session.midi_revision
                 or not player_engine.events
             ):
@@ -563,6 +565,7 @@ def create_app(
                     channels=dict(web_session.track_channels),
                 )
                 player_engine.loaded_revision = web_session.midi_revision
+                player_engine.loaded_path = orig_resolved
 
     @app.post("/api/realtime/play")
     def realtime_play() -> Response:
@@ -571,8 +574,7 @@ def create_app(
         web_session.require_tracks()
         body = request.get_json(silent=True) or {}
         start_sec = float(body.get("startSeconds", 0.0))
-        if not player_engine.events:
-            _ensure_realtime_loaded()
+        _ensure_realtime_loaded()
         player_engine.play(start_sec)
         return jsonify(
             playing=True,
@@ -597,8 +599,7 @@ def create_app(
 
         body = request.get_json(silent=True) or {}
         sec = float(body.get("seconds", 0.0))
-        if not player_engine.events:
-            _ensure_realtime_loaded()
+        _ensure_realtime_loaded()
         player_engine.seek(sec)
         return jsonify(
             playing=player_engine.is_playing,

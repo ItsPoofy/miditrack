@@ -111,3 +111,81 @@ def test_realtime_routes():
     res = client.post("/api/realtime/pause")
     assert res.status_code == 200
     assert res.get_json()["playing"] is False
+
+
+def test_realtime_player_stop_and_active_notes():
+    player = RealtimeMidiPlayer()
+    mock_out = MockOutput()
+    player.output = mock_out
+
+    # Simulate Note-On on ch 0, note 60
+    msg_on = TimedMidiMessage(time=0.0, track_index=0, channel=0, status=0x90, data1=60, data2=100)
+    player._dispatch_message(msg_on)
+    assert (0, 60) in player.active_notes
+
+    # Simulate Note-On on ch 1, note 72
+    msg_on2 = TimedMidiMessage(time=0.1, track_index=1, channel=1, status=0x90, data1=72, data2=90)
+    player._dispatch_message(msg_on2)
+    assert (1, 72) in player.active_notes
+
+    # Note-Off for note 60 via vel=0
+    msg_off = TimedMidiMessage(time=0.2, track_index=0, channel=0, status=0x90, data1=60, data2=0)
+    player._dispatch_message(msg_off)
+    assert (0, 60) not in player.active_notes
+    assert (1, 72) in player.active_notes
+
+    # Call _all_notes_off: should send explicit note off for (1, 72) and reset output
+    mock_out.sent.clear()
+    player._all_notes_off()
+    assert (0x81, 72, 0) in mock_out.sent
+    assert ("reset",) in mock_out.sent
+    assert len(player.active_notes) == 0
+
+    # Test stop clears everything
+    player.loaded_path = "C:/fake/path.mid"
+    player.loaded_revision = 42
+    player.events = [msg_on]
+    player.event_times = [0.0]
+    player.duration = 10.0
+    player.stop()
+    assert player.loaded_path is None
+    assert player.loaded_revision is None
+    assert len(player.events) == 0
+    assert player.duration == 0.0
+
+
+def test_seek_does_not_hold_sustain():
+    player = RealtimeMidiPlayer()
+    mock_out = MockOutput()
+    player.output = mock_out
+
+    # Song with CC 64 (Sustain ON) at 0.5s and Program Change 5 at 0.1s
+    ev1 = TimedMidiMessage(time=0.1, track_index=0, channel=0, status=0xC0, data1=5, data2=0)
+    ev2 = TimedMidiMessage(time=0.5, track_index=0, channel=0, status=0xB0, data1=64, data2=127)
+    player.events = [ev1, ev2]
+    player.event_times = [0.1, 0.5]
+    player.duration = 2.0
+
+    mock_out.sent.clear()
+    player.seek(1.0)
+    # Timbre (PC 5) should be restored
+    assert (0xC0, 5, 0) in mock_out.sent
+    # But CC 64 (Sustain pedal) must NOT be replayed as ON
+    assert (0xB0, 64, 127) not in mock_out.sent
+
+
+def test_session_reset_stops_player_engine():
+    from miditrack.realtime_player import player_engine
+    from miditrack.web_session import WebSession
+
+    player_engine.loaded_path = "C:/fake/song1.mid"
+    player_engine.loaded_revision = 5
+    player_engine.events = [TimedMidiMessage(0.0, 0, 0, 0x90, 60, 100)]
+
+    session = WebSession()
+    session.reset_midi_state()
+
+    assert player_engine.loaded_path is None
+    assert player_engine.loaded_revision is None
+    assert len(player_engine.events) == 0
+
